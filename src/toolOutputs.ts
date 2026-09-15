@@ -28,6 +28,7 @@ export class ToolOutputs {
   const id=randomUUID();this.values.set(id,value);this.size+=bytes;this.dirty=true;
   return JSON.stringify({preview:value.slice(0,limit),truncated:true,output_id:id,next_offset:limit,total_characters:value.length,instruction:'Use read_tool_output with output_id and next_offset as offset. Retained pages are available across session restarts; older pages may expire when storage reaches its limit.'});
  }
+ full(id:string){const value=this.values.get(id);if(value===undefined)throw new Error('Output expired or was not retained. The displayed preview is partial.');return value;}
  read(id:string,offset=0,limit=2000){
   const value=this.values.get(id);if(value===undefined)throw new Error('Output expired or unavailable. The preview was partial. Run a narrower original query.');
   const end=Math.min(value.length,offset+limit);

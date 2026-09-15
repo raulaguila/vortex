@@ -81,6 +81,13 @@ function activityRow(event){
  if(tool==='list_files'&&status==='success'){
    const files=create('ul','activity-files');for(const line of lines.filter(Boolean)){const li=create('li');li.append(create('span','',line));files.append(li);}output.append(files);
  }else output.append(create('pre','',lines.join('\n')));
+ if(event.activity?.truncated){
+  output.append(create('p','',pt?'Exibindo parte do resultado.':'Showing part of the result.'));
+  if(event.activity.sessionId&&event.activity.outputRef){
+   const full=create('button','text-button',pt?'Ver resultado completo':'View full output');
+   full.onclick=()=>request('openActivityOutput',{sessionId:event.activity.sessionId,activityId:event.activity.id});output.append(full);
+  }else output.append(create('p','',pt?'O resultado completo não foi retido.':'Full output was not retained.'));
+ }
  details.append(output);return details;
 }
 function welcome(){delete $('chat-heading').dataset.title;$('chat-heading').title='';contextUsage=null;renderContext();$('close-chat').hidden=true;$('chat-heading').querySelector('span').textContent=window.VortexUI.t('Chats');$('timeline').replaceChildren();const el=create('div','welcome');el.id='welcome';const img=create('img','empty-symbol');img.src=document.querySelector<HTMLImageElement>('.brand img').src;img.alt='Vortex';el.append(img);$('timeline').append(el);renderRecent();}
@@ -257,7 +264,7 @@ onHostMessage(m=>{
  if(m.type==='runFailure'){
   recovery.replaceChildren();recovery.hidden=false;
   const add=(label,type,data?:Record<string,unknown>)=>{const b=create('button','',window.VortexUI.t(label));b.onclick=()=>{request(type,data||{});if(type==='retry')recovery.hidden=true;};recovery.append(b);};
-  if(m.retryable)add('Try again','retry');if(m.code==='tool_validation')add('Open settings','openSettings',{section:'models'});if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
+  if(m.code==='uncertain_outcome'){add('Review changes','reviewChanges');add('Undo task changes','undoChanges');}if(m.retryable)add('Try again','retry');if(m.code==='tool_validation')add('Open settings','openSettings',{section:'models'});if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
  }
 });
 
@@ -272,3 +279,6 @@ onHostMessage(m=>{
 });
 
 onHostMessage(m=>{if(m.type==='sessionLoaded')sessionReadOnly=!!m.readOnly;else if(m.type==='accepted'||m.type==='history'&&!m.events.length)sessionReadOnly=false;else return;updateBusy(busy);$('prompt').readOnly=sessionReadOnly;if(sessionReadOnly)for(const id of ['send','mode-trigger','permission-trigger','model-trigger'])$(id).disabled=true;});
+
+const persistenceWarning=create('div','notice error');persistenceWarning.setAttribute('role','alert');persistenceWarning.hidden=true;$('timeline').before(persistenceWarning);
+onHostMessage(m=>{if(m.type==='persistenceState'){persistenceWarning.hidden=!m.failed;persistenceWarning.textContent=window.VortexUI.language()==='pt'?'Não foi possível salvar o progresso. Verifique o armazenamento antes de continuar.':'Progress could not be saved. Check storage before continuing.';}});

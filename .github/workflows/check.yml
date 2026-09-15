@@ -38,6 +38,14 @@ jobs:
       - if: runner.os == 'Linux'
         run: xvfb-run -a sh -c 'npm run test:ui && npm run test:host'
       - run: npm run package
+      - if: runner.os != 'Linux'
+        run: node test/extension-host.cjs
+        env:
+          VORTEX_VSIX_PATH: ${{ github.workspace }}/vortex-agent.vsix
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a node test/extension-host.cjs
+        env:
+          VORTEX_VSIX_PATH: ${{ github.workspace }}/vortex-agent.vsix
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,3 +78,44 @@ jobs:
       - run: npm run test:sandbox
         env:
           VORTEX_REQUIRE_SANDBOX: '1'
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run benchmark
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vortex-benchmark
+          path: test-results/benchmark.json
+
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: f486fcd712f1bfb2d6ea8c4c1afd362d5c46a2ea
+          path: baseline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run package
+        working-directory: baseline
+      - run: npm ci && npm run package
+      - run: xvfb-run -a node test/extension-host.cjs
+        env:
+          VORTEX_VSIX_PATH: ${{ github.workspace }}/vortex-agent.vsix
+          VORTEX_UPGRADE_FROM: ${{ github.workspace }}/baseline/vortex-agent.vsix
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vortex-upgrade
+          path: test-results/

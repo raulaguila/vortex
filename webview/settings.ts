@@ -16,7 +16,7 @@ function request(type,data={},context:{commit?:boolean;section?:string;id?:strin
  if(!context.commit&&stage(type,data))return;
 const requestId=session+':'+(++sequence);pending.set(requestId,{type,...context});vscode.postMessage({type,requestId,...data});return requestId;}
 function notice(id,text='',error=false){$(id).textContent=text;$(id).classList.toggle('error',error);}
-function switchSection(next){notice('settings-notice');section=next;for(const name of ['providers','models','conversation','execution','diagnostics']){$('section-'+name).hidden=name!==next;const tab=$('nav-'+name);tab.setAttribute('aria-selected',String(name===next));tab.tabIndex=name===next?0:-1;}vscode.setState({section});if(next==='diagnostics'){request('traceInfo');request('storageInfo');}}
+function switchSection(next){notice('settings-notice');section=next;for(const name of ['providers','models','conversation','execution','diagnostics']){$('section-'+name).hidden=name!==next;const tab=$('nav-'+name);tab.setAttribute('aria-selected',String(name===next));tab.tabIndex=name===next?0:-1;}vscode.setState({section});if(next==='diagnostics'){request('traceInfo');request('storageInfo');request('recoveryInfo');}}
 function updateBusy(value){busy=value;$('add-provider').disabled=value||!!formPending;$('provider-form').querySelectorAll('input,select,button').forEach(el=>el.disabled=value||formPending?.kind==='save');if(!value&&formPending?.kind!=='save')$('provider-key').disabled=$('clear-key').checked;if(formPending)$(formPending.kind==='save'?'save-provider':'test-provider').disabled=true;renderConnections();timeoutFields();}
 function catalogText(p) {
   const c = p.catalog;
@@ -250,3 +250,6 @@ onHostMessage(m=>{
  if(m.type==='storageInfo'){storageInfo.textContent=m.sessions+' '+window.VortexUI.t('sessions')+' · '+(m.bytes/1048576).toFixed(1)+' MiB';retention.value=String(m.retentionDays);}
 });
 $('context-model').addEventListener('change',()=>notice('tools-test-result'));
+
+const recoverySection=create('section');recoverySection.append(create('h3','',window.VortexUI.language()==='pt'?'Recuperação de sessões':'Session recovery'));const recoveryItems=create('div');recoverySection.append(recoveryItems);$('section-diagnostics').append(recoverySection);
+onHostMessage(m=>{if(m.type!=='recoveryInfo')return;recoveryItems.replaceChildren();const pt=window.VortexUI.language()==='pt';if(!m.items.length)recoveryItems.append(create('p','',pt?'Nenhuma recuperação pendente.':'No pending recovery.'));for(const item of m.items){const b=create('button','secondary-button',(item.kind==='backup'?(pt?'Restaurar backup':'Restore backup'):(pt?'Recuperar bloqueio':'Recover lock'))+' · '+item.id.slice(0,8));b.onclick=()=>request('recoverSession',item);recoveryItems.append(b);}});

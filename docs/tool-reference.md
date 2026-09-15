@@ -1,6 +1,6 @@
-# Catálogo de ferramentas — Vortex 0.9.0
+# Catálogo de ferramentas — Vortex 0.10.0
 
-Contratos implementados em `src/actions.ts`. Descrições em inglês são enviadas ao modelo; rótulos da interface continuam traduzidos. Nomes antigos não são aliases. Inicie uma nova conversa após atualizar para evitar misturar contratos no contexto.
+Contratos implementados em `src/actions.ts`. Descrições em inglês são enviadas ao modelo; rótulos da interface continuam traduzidos. Os nomes anteriores à 0.9.0 não são aliases. A 0.10.0 preserva os nomes e acrescenta cursores de continuação em listagem e busca.
 
 ## Renomeações
 
@@ -24,6 +24,7 @@ Contratos implementados em `src/actions.ts`. Descrições em inglês são enviad
 | command | run_command | agent |
 
 `finish` encerra o protocolo de compatibilidade. No protocolo nativo, a resposta textual final encerra o turno; `finish` não é anunciado como ferramenta. As permissões são verificadas pelo executor, independentemente das instruções do modelo.
+
 
 ## finish
 
@@ -51,7 +52,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 ## list_files
 
-Discover workspace paths using OR-combined glob patterns; exclusions remove matches. Use for project structure or locating files before reading. Returns paths, not contents, with coverage and next_offset. Default page: 100; maximum: 500. Never treat a partial page as the entire workspace.
+Discover workspace paths using OR-combined glob patterns; exclusions remove matches. Use for project structure or locating files before reading. Returns paths, not contents, with coverage and next_cursor; continue with the same filters. Default page: 100; maximum: 500. Never treat a partial page as the entire workspace.
 
 Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
@@ -82,6 +83,12 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
       "minItems": 0,
       "maxItems": 20,
       "description": "Additional exclusion globs. Default: []. Cannot disable protected-file exclusions."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque next_cursor from the previous page. Repeat the same filters; omit to restart.",
+      "maxLength": 36,
+      "minLength": 1
     },
     "offset": {
       "type": "integer",
@@ -139,7 +146,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 ## search_files
 
-Search text in workspace files matching OR-combined patterns. Literal and case-insensitive by default; regex is optional. offset pages files, not matches; each page scans up to 100 files. Inspect coverage, skipped_files and next_offset: no matches only describes scanned files.
+Search text in workspace files matching OR-combined patterns. Literal and case-insensitive by default; regex is optional. Initial offset pages files; each page reads up to 100 files. Use next_cursor with the same query and filters to continue within a truncated file. Inspect coverage and skipped_reasons: no matches only describes scanned files.
 
 Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
@@ -176,6 +183,12 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
       "minItems": 0,
       "maxItems": 20,
       "description": "Additional exclusion globs. Default: []. Cannot disable protected-file exclusions."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque next_cursor from the previous page. Repeat query and filters; omit to restart.",
+      "maxLength": 36,
+      "minLength": 1
     },
     "offset": {
       "type": "integer",

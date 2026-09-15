@@ -1,3 +1,4 @@
+import type {Change} from './changes';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ApprovalDenied,validateAction } from './actions';
@@ -27,12 +28,13 @@ export class AgentController extends AgentRuntime {
    execute:async()=>{throw new Error('Host tool dispatcher unavailable.');}
   });
  }
+  private async mutateWithoutReview(file:string,apply:()=>Promise<void>,save:()=>Promise<void>){try{await apply();await save();}catch{throw new ExecutionError('uncertain_outcome','Operation on '+file+' may have changed the workspace. Review before continuing.');}}
   protected verifyRead(snapshot:FileSnapshot){
     const previous=this.readVersions.get(snapshot.path);
     if(this.run&&snapshot.content!==null&&!previous)throw new Error('Read the existing file before changing it.');
     if(previous&&(snapshot.content===null||previous!==contentVersion(snapshot.content)))throw new Error('File changed since your last read. Read it again before editing.');
   }
-  protected async execute(input:unknown,mode:Mode,root:string|undefined,signal:AbortSignal,permission:Permission='supervised',expected?:FileSnapshot):Promise<string>{
+  protected async execute(input:unknown,mode:Mode,root:string|undefined,signal:AbortSignal,permission:Permission='supervised',expected?:FileSnapshot,prepared?:Change):Promise<string>{
     signal.throwIfAborted();
     if(!isMode(mode)||!isPermission(permission))throw new Error('Invalid execution policy.');
     const a=validateAction(input,mode);
@@ -50,7 +52,7 @@ export class AgentController extends AgentRuntime {
     if(a.action==='write_file'){
       if(typeof a.content!=='string'||a.content.length>200000)throw new Error('Conteúdo inválido ou maior que 200 KB.');
       const snapshot=expected||await snapshotFile(root,a.path);const file=snapshot.path;this.verifyRead(snapshot);
-      const change=this.session&&this.reviews?await this.reviews.propose(this.session.id,a.path,snapshot.content,a.content):undefined;
+      const change=prepared||(this.session&&this.reviews?await this.reviews.propose(this.session.id,a.path,snapshot.content,a.content):undefined);
       let partial=false;
       if(permission==='supervised'){
         if(change)await this.reviews!.preview(change);
@@ -64,19 +66,19 @@ export class AgentController extends AgentRuntime {
       const uri=vscode.Uri.file(file);const edit=new vscode.WorkspaceEdit();let exists=true;try{await vscode.workspace.fs.stat(uri);}catch{exists=false;}
       if(exists){const doc=await vscode.workspace.openTextDocument(uri);if(doc.isDirty||doc.getText()!==snapshot.content)throw new Error('The file has changed or contains unsaved edits. Read it again before editing.');edit.replace(uri,new vscode.Range(doc.positionAt(0),doc.positionAt(doc.getText().length)),a.content);}else{edit.createFile(uri,{overwrite:false});edit.insert(uri,new vscode.Position(0,0),a.content);}
       signal.throwIfAborted();
-      if(!await vscode.workspace.applyEdit(edit))throw new Error('Não foi possível aplicar a edição.');const doc=await vscode.workspace.openTextDocument(uri);if(!await doc.save())throw new Error('Edição aplicada mas não salva.');this.readVersions.set(file,contentVersion(a.content));if(change)await this.reviews!.mark(this.session!.id,change.id,'applied');if(partial)throw new ApprovalDenied('Selected changes applied to '+a.path+'. Remaining changes were rejected; the turn stopped.');return 'Arquivo salvo: '+a.path;
+      const apply=async()=>{if(!await vscode.workspace.applyEdit(edit))throw new Error('Unable to apply edit.');};const save=async()=>{const doc=await vscode.workspace.openTextDocument(uri);if(!await doc.save())throw new Error('Edit applied but not saved.');};if(change)await this.reviews!.mutate(this.session!.id,change,apply,save);else await this.mutateWithoutReview(a.path,apply,save);this.readVersions.set(file,contentVersion(a.content));if(partial)throw new ApprovalDenied('Selected changes applied to '+a.path+'. Remaining changes were rejected; the turn stopped.');return 'Arquivo salvo: '+a.path;
     }
     if(a.action==='delete_file'){
       const snapshot=expected||await snapshotFile(root,a.path);if(snapshot.content===null)throw new Error('File not found.');
       this.verifyRead(snapshot);
-      const change=this.session&&this.reviews?await this.reviews.propose(this.session.id,a.path,snapshot.content,null):undefined;
+      const change=prepared||(this.session&&this.reviews?await this.reviews.propose(this.session.id,a.path,snapshot.content,null):undefined);
       if(permission==='supervised'){
         if(change)await this.reviews!.preview(change);
         if(await this.approval(()=>vscode.window.showWarningMessage('Remove '+a.path+'?',{modal:true},'Remove'))!=='Remove'){if(change)await this.reviews!.mark(this.session!.id,change.id,'rejected');throw new ApprovalDenied();}
       }
       signal.throwIfAborted();await verifySnapshot(root,a.path,snapshot);const uri=vscode.Uri.file(snapshot.path);const doc=await vscode.workspace.openTextDocument(uri);
-      if(doc.isDirty)throw new Error('Unsaved changes preserved.');const edit=new vscode.WorkspaceEdit();edit.deleteFile(uri,{recursive:false});if(!await vscode.workspace.applyEdit(edit))throw new Error('Unable to remove file.');
-      this.readVersions.delete(snapshot.path);if(change)await this.reviews!.mark(this.session!.id,change.id,'applied');return 'Removed '+a.path;
+      if(doc.isDirty)throw new Error('Unsaved changes preserved.');const edit=new vscode.WorkspaceEdit();edit.deleteFile(uri,{recursive:false});const apply=async()=>{if(!await vscode.workspace.applyEdit(edit))throw new Error('Unable to remove file.');};if(change)await this.reviews!.mutate(this.session!.id,change,apply,async()=>{});else await this.mutateWithoutReview(a.path,apply,async()=>{});
+      this.readVersions.delete(snapshot.path);return 'Removed '+a.path;
     }
     if(a.action==='run_command'){
       if(typeof a.command!=='string'||!a.command.trim())throw new Error('Comando inválido.');
@@ -89,12 +91,17 @@ export class AgentController extends AgentRuntime {
           const result=await this.sandbox.execute(root,a.cwd&&a.cwd!=='.'?`cd '${a.cwd.replace(/'/g,"'\\''")}' && ${a.command}`:a.command,signal,this.commandTimeout,!!a.request_network,image,(stream,text)=>this.commandOutput(stream,text));
           if(result.failure){try{for(const change of result.changes)if(this.session&&this.reviews)await this.reviews.propose(this.session.id,change.path,change.before,change.after);if(result.changes.length)this.event('activity','Interrupted sandbox changes\nChanges retained for review; no changes imported.');}catch{throw new ExecutionError('uncertain_outcome','The interrupted command could not save all review data. Inspect the workspace and diagnostics before continuing.');}throw result.failure;}
           if(result.artifacts.length)this.event('activity','Sandbox artifacts\n'+result.artifacts.join('\n'));
-          for(const change of result.changes){
+          // Validate the whole import before any workspace mutation.
+          const proposals=new Map<string,Change>();for(const change of result.changes)if(this.session&&this.reviews)proposals.set(change.path,await this.reviews.propose(this.session.id,change.path,change.before,change.after));
+          for(const change of result.changes){const current=await snapshotFile(root,change.path);if(current.content!==change.before)throw new ExecutionError('uncertain_outcome','Sandbox import conflict at '+change.path+'. No import started; review retained proposals.');}
+          const imported:string[]=[];try{for(const change of result.changes){
             const current=await snapshotFile(root,change.path);
             if(current.content!==change.before)throw new Error('Sandbox import conflict: '+change.path+'. User changes preserved.');
             if(current.content!==null)this.readVersions.set(current.path,contentVersion(current.content));
-            await this.execute(change.after===null?{action:'delete_file',path:change.path}:{action:'write_file',path:change.path,content:change.after},mode,root,signal,permission,current);
+            await this.execute(change.after===null?{action:'delete_file',path:change.path}:{action:'write_file',path:change.path,content:change.after},mode,root,signal,permission,current,proposals.get(change.path));
+            imported.push(change.path);
           }
+          }catch{throw new ExecutionError('uncertain_outcome','Sandbox import paused. Imported: '+(imported.join(', ')||'none')+'. Review remaining proposals before continuing.');}
           if(result.error)throw new Error(result.error);
           return JSON.stringify({execution_location:'sandbox',output:result.output});
         }

@@ -1,3 +1,4 @@
+import {invalidateFileQueries} from './readTools';
 import {probeModel} from './modelProbe';
 import * as vscode from 'vscode';
 import {randomBytes} from 'node:crypto';
@@ -7,6 +8,7 @@ import {readFileSync} from 'node:fs';
 import {EditorContext} from './editorContext';
 import {AgentController} from './agent';
 import {ProviderManager} from './providerManager';
+import {ProfileStore} from './profileStore';
 import {parseRequest, Request, Response,SettingsSection} from './protocol';
 import {execFile} from 'node:child_process';
 import {Sandbox} from './sandbox';
@@ -38,6 +40,7 @@ class VortexController implements vscode.WebviewViewProvider {
   private chatTest?:AbortController;
   private settingsSection: SettingsSection = 'providers';
   constructor(private ctx: vscode.ExtensionContext) {
+    const queryWatcher=vscode.workspace.createFileSystemWatcher('**/*');ctx.subscriptions.push(queryWatcher,queryWatcher.onDidChange(invalidateFileQueries),queryWatcher.onDidCreate(invalidateFileQueries),queryWatcher.onDidDelete(invalidateFileQueries),vscode.workspace.onDidChangeTextDocument(invalidateFileQueries));
     this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,ctx.globalStorageUri.fsPath,vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json').fsPath);
     const traceUri=vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json');
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.openLastFlow',async()=>{try{await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(traceUri));}catch{void vscode.window.showInformationMessage('No saved flow yet. Send a message to Vortex first.');}}));
@@ -51,11 +54,12 @@ class VortexController implements vscode.WebviewViewProvider {
       await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Vortex — Downloading sandbox image'},()=>new Promise<void>((resolve,reject)=>execFile('docker',['pull',image],{timeout:300000,maxBuffer:1024*1024},error=>error?reject(new Error('Image download failed. Check Docker and network access.')):resolve())));
       await vscode.workspace.getConfiguration('vortex').update('sandbox.image',image,vscode.ConfigurationTarget.Global);
     }));
+    const outputDocuments=new Map<string,string>();ctx.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('vortex-output',{provideTextDocumentContent:uri=>outputDocuments.get(uri.toString())||''}),vscode.workspace.onDidCloseTextDocument(doc=>{if(doc.uri.scheme==='vortex-output')outputDocuments.delete(doc.uri.toString());}));this.outputDocuments=outputDocuments;
     const reviews=new ReviewService(new ChangeStore(vscode.Uri.joinPath(ctx.globalStorageUri,'changes').fsPath));ctx.subscriptions.push(reviews);
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.agent.reviewChanges()),vscode.commands.registerCommand('vortex.undoChanges',()=>this.agent.undoChanges()));
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',async(uri?:vscode.Uri)=>{await this.attachments.choose(uri);this.attachmentState();}));
     const editor=new EditorContext();ctx.subscriptions.push(editor);
-    this.providers = new ProviderManager(ctx.globalState, ctx.secrets,undefined,log);
+    this.providers = new ProviderManager(new ProfileStore(ctx.globalState), ctx.secrets,undefined,log);
     this.agent = new AgentController(this.providers, message => {
       if(message.type==='toolProgress')log({runId:message.runId,id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
       if(message.type==='runEnd')log({id:message.requestId,status:message.status});
@@ -67,6 +71,7 @@ class VortexController implements vscode.WebviewViewProvider {
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
     }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor,traceUri.fsPath);
   }
+  private outputDocuments=new Map<string,string>();
   private traceUri(){return vscode.Uri.joinPath(this.ctx.storageUri||this.ctx.globalStorageUri,'last-flow.json');}
   private async traceInfo(target:Surface){const uri=this.traceUri();const info=await stat(uri.fsPath).catch(()=>undefined);this.post(target,{type:'traceInfo',path:uri.fsPath,exists:!!info,bytes:info?.size||0});}
   private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
@@ -144,6 +149,9 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'retry':if(target.kind!=='chat')throw new Error('Use the conversation.');this.routes.set(msg.requestId,target);try{await this.agent.retry(msg.requestId);}finally{this.routes.delete(msg.requestId);}return;
       case 'saveModels':if(this.agent.busy)throw new Error('Stop the task before saving model settings.');await this.providers.saveModels(msg.settings);break;
       case 'traceInfo':await this.traceInfo(target);return;
+      case 'openActivityOutput':{const content=await this.agent.activityOutput(msg.sessionId,msg.activityId);const uri=vscode.Uri.from({scheme:'vortex-output',path:'/'+msg.sessionId+'/'+msg.activityId+'.txt'});this.outputDocuments.set(uri.toString(),content);await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri),{preview:true});success();return;}
+      case 'recoveryInfo':this.post(target,{type:'recoveryInfo',items:await this.sessions.recoverable()});return;
+      case 'recoverSession':if(this.agent.busy)throw new Error('Stop the task first.');if(await vscode.window.showWarningMessage(msg.kind==='backup'?'Restore the last valid session snapshot? The damaged file will be preserved.':'Remove an empty abandoned session lock? Close other Vortex windows first.',{modal:true},'Recover')==='Recover')await this.sessions.recover(msg.id,msg.kind);this.post(target,{type:'recoveryInfo',items:await this.sessions.recoverable()});success();return;
       case 'openTrace':await vscode.commands.executeCommand('vortex.openLastFlow');success();return;
       case 'exportTrace':{
         const uri=await vscode.window.showSaveDialog({defaultUri:vscode.Uri.file('vortex-flow.json'),filters:{JSON:['json']}});if(uri){await RunTrace.settled(this.traceUri().fsPath);const snapshot=await readFile(this.traceUri().fsPath);await vscode.workspace.fs.writeFile(uri,snapshot);}success();return;

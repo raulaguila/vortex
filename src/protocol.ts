@@ -17,11 +17,14 @@ export interface ModelLimits { tools?: boolean; input: number | null; output: nu
 export interface ChecklistItem { id: string; text: string; status: 'pending' | 'in_progress' | 'completed' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
 export interface SettingsState {diagnosticVersions?:Record<string,string>;effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
-export interface ActivityData {runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}
+export interface ActivityData {operation?:import('./operation').OperationState;sessionId?:string;outputRef?:string;truncated?:boolean;runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}
 export type RunPhase='preparing'|'context'|'waiting_model'|'receiving'|'compacting'|'approval'|'tool'|'summarizing'|'finishing'|'recovering';
 export interface RunProgress {runId:string;phase:RunPhase;startedAt:number;phaseStartedAt:number;tool?:{id:string;name:string;path?:string}}
 export interface AgentEvent { failureCode?:string; activity?:ActivityData; incomplete?:boolean; role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
 export type Request = (
+  | {type:'openActivityOutput';sessionId:string;activityId:string}
+  | {type:'recoveryInfo'}
+  | {type:'recoverSession';id:string;kind:'backup'|'lock'}
   | { type: 'ready'; legacySelection?: ModelRef }
   | { type: 'saveProvider' | 'testProvider'; provider: ProviderInput }
   | { type: 'removeProvider' | 'refreshModels'; id: string }
@@ -54,6 +57,8 @@ export type Request = (
   | { type: 'stop' }
 ) & { requestId: string };
 export type Response =
+  | {type:'recoveryInfo';items:{id:string;kind:'backup'|'lock'}[]}
+  | {type:'persistenceState';failed:boolean}
   | {type:'activityUpdate';activity:ActivityData}
   | {type:'storageInfo';bytes:number;sessions:number;retentionDays:0|30|90|180}
   | {type:'commandOutput';runId:string;id:string;stream:'stdout'|'stderr';text:string}
@@ -96,6 +101,9 @@ export function parseRequest(v: unknown): Request {
   if (!record(v) || !string(v.requestId, 100)) throw new Error('Mensagem inválida.');
   let valid = false;
   switch (v.type) {
+    case 'openActivityOutput':valid=string(v.sessionId,100)&&string(v.activityId,100);break;
+    case 'recoveryInfo':valid=true;break;
+    case 'recoverSession':valid=string(v.id,100)&&['backup','lock'].includes(String(v.kind));break;
     case 'ready': valid = v.legacySelection === undefined || isModelRef(v.legacySelection); break;
     case 'saveProvider': case 'testProvider': valid = isProvider(v.provider); break;
     case 'removeProvider': case 'refreshModels': valid = string(v.id); break;

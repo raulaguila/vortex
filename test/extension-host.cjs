@@ -30,22 +30,50 @@ const root=path.resolve(__dirname,'..');
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let app;
   try{
     // This suite exercises host-command approval; real Docker isolation has its own required CI job.
-    app=await _electron.launch({env:{...process.env,DOCKER_HOST:'tcp://127.0.0.1:1',DOCKER_CONTEXT:''},executablePath:await require('./runtime-paths.cjs').vscodePath(),args:[...(process.platform==='linux'?['--password-store=basic']:[]),'--no-sandbox','--skip-welcome','--skip-release-notes','--disable-updates','--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),'--extensionDevelopmentPath='+(process.env.VORTEX_EXTENSION_PATH||root),path.join(temp,'workspace')],timeout:30000});
+    const executablePath=await require('./runtime-paths.cjs').vscodePath();
+    async function install(vsix){const {execFile}=require('node:child_process');const [cli,...args]=require('@vscode/test-electron').resolveCliArgsFromVSCodeExecutablePath(executablePath,{reuseMachineInstall:true});await new Promise((resolve,reject)=>execFile(cli,[...args,'--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),'--install-extension',vsix,'--force'],{timeout:60000,shell:process.platform==='win32'},(e,out,err)=>e?reject(new Error(String(err))):resolve(out)));}
+    if(process.env.VORTEX_VSIX_PATH)await install(process.env.VORTEX_UPGRADE_FROM||process.env.VORTEX_VSIX_PATH);
+    async function launch(){
+    app=await _electron.launch({env:{...process.env,DOCKER_HOST:'tcp://127.0.0.1:1',DOCKER_CONTEXT:''},executablePath,args:[...(process.platform==='linux'?['--password-store=basic']:[]),'--no-sandbox','--skip-welcome','--skip-release-notes','--disable-updates','--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),...(process.env.VORTEX_VSIX_PATH?[]:['--extensionDevelopmentPath='+(process.env.VORTEX_EXTENSION_PATH||root)]),path.join(temp,'workspace')],timeout:30000});
     const window=await app.firstWindow();await window.waitForLoadState('domcontentloaded');window.setDefaultTimeout(20000);await window.locator('.monaco-workbench').waitFor();
     await window.locator('.activitybar [aria-label^="Vortex"]').first().waitFor();
     await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Vortex: Abrir agente');await window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Vortex: Abrir agente'}).first().click();
+    return window;
+    }
+    let window=await launch();
     async function findFrame(selector){for(let i=0;i<100;i++){for(const page of app.context().pages())for(const frame of page.frames())if(await frame.locator(selector).count())return frame;await new Promise(resolve=>setTimeout(resolve,100));}await window.screenshot({path:path.join(root,'test-results','host-failure.png')});throw new Error('Webview not found: '+selector);}
     let frame=await findFrame('#prompt');await frame.evaluate(()=>{window.testStates=[];window.addEventListener('message',e=>{if(e.data.type==='state')window.testStates.push(e.data.state);});});
-    await frame.locator('#prompt').fill('Rascunho preservado');await frame.locator('#open-settings').click();const settings=await findFrame('#nav-providers');await settings.locator('#add-provider').click();
+    await frame.locator('#prompt').fill('Rascunho preservado');await frame.locator('#open-settings').click();let settings=await findFrame('#nav-providers');await settings.locator('#add-provider').click();
     await settings.locator('#cancel-form').click();await settings.locator('#nav-execution').click();await settings.locator('[name="firstResponseTimeout"]').fill('600');await settings.locator('.execution-settings button[type="submit"]').click();
     await frame.waitForFunction(()=>window.testStates.some(s=>s.preferences.execution?.firstResponseTimeout===600));
+    if(process.env.VORTEX_UPGRADE_FROM)await new Promise(resolve=>setTimeout(resolve,1000));
     await settings.locator('#nav-providers').click();await settings.locator('#add-provider').click();
     await settings.locator('#provider-kind').selectOption('ollama');await settings.locator('#provider-name').fill('Ollama test');await settings.locator('#provider-url').fill(`http://127.0.0.1:${server.address().port}`);
     await settings.locator('#test-provider').click();await settings.locator('#form-notice').filter({hasText:'Connection tested'}).waitFor();await settings.locator('#save-provider').click();await settings.locator('.connection-status').filter({hasText:'1 models'}).waitFor();await settings.locator('#cancel-form').click();
     assert.equal(await frame.locator('#prompt').inputValue(),'Rascunho preservado');
+    if(process.env.VORTEX_UPGRADE_FROM)await new Promise(resolve=>setTimeout(resolve,1000));
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#selected-model').filter({hasText:'vortex-test-model'}).waitFor();
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Answer questions'}).click();await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();try{await frame.locator('.message-body').filter({hasText:'Conexão validada no Extension Host'}).waitFor();}catch(e){console.log('Vortex test state:',await frame.locator('body').innerText());console.log('Snapshot trace:',await frame.evaluate(()=>JSON.stringify({received:window.testStates})));throw e;}
-    await frame.waitForFunction(()=>!document.getElementById('stop')||document.getElementById('stop').hidden);await settings.locator('#nav-models').click();await settings.locator('#test-chat').click();await settings.locator('#chat-test-result').filter({hasText:'OK ·'}).waitFor();
+    await frame.waitForFunction(()=>!document.getElementById('stop')||document.getElementById('stop').hidden);if(process.env.VORTEX_UPGRADE_FROM){
+      await frame.locator('#prompt').fill('Upgrade draft retained');
+      const closed=app.waitForEvent('close');if(process.platform==='darwin')await window.keyboard.press('Meta+q');else{await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>File: Exit');await window.locator('.quick-input-list .monaco-list-row').filter({hasText:'File: Exit'}).first().click();}await closed;app=undefined;await install(process.env.VORTEX_VSIX_PATH);window=await launch();frame=await findFrame('#prompt');
+      await frame.evaluate(()=>{window.testStates=[];window.addEventListener('message',e=>{if(e.data.type==='state')window.testStates.push(e.data.state);});});
+      await frame.locator('.message-body').filter({hasText:'Conexão validada no Extension Host'}).waitFor();
+      assert.equal(await frame.locator('#prompt').inputValue(),'Upgrade draft retained');
+      await frame.locator('#selected-model').filter({hasText:'vortex-test-model'}).waitFor();
+      await frame.locator('#open-settings').click();settings=await findFrame('#nav-providers');await settings.locator('.connection h3').filter({hasText:'Ollama test'}).waitFor();
+      await settings.locator('#nav-execution').click();assert.equal(await settings.locator('[name="firstResponseTimeout"]').inputValue(),'600');
+      console.log('Upgrade preserved session, draft, connection, model selection and preferences.');
+    }else{
+      // Reload immediately after rapid writes: connections and preferences must survive together.
+      await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Developer: Reload Window');
+      await Promise.all([window.waitForEvent('domcontentloaded'),window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Developer: Reload Window'}).first().click()]);
+      await window.locator('.monaco-workbench').waitFor();frame=await findFrame('#prompt');await frame.locator('.message-body').first().waitFor();
+      await frame.locator('#selected-model').filter({hasText:'vortex-test-model'}).waitFor();
+      await frame.evaluate(()=>{window.testStates=[];window.addEventListener('message',e=>{if(e.data.type==='state')window.testStates.push(e.data.state);});});
+      await frame.locator('#open-settings').click();settings=await findFrame('#nav-providers');await settings.locator('.connection h3').filter({hasText:'Ollama test'}).waitFor();
+    }
+    await settings.locator('#nav-models').click();await settings.locator('#test-chat').click();await settings.locator('#chat-test-result').filter({hasText:'OK ·'}).waitFor();
     await settings.locator('#test-tools').click();await settings.locator('#tools-test-result').filter({hasText:'Tools: validated'}).waitFor();
     await settings.locator('#output-limit').fill('8000');await settings.locator('#save-models').click();await frame.waitForFunction(()=>window.testStates.some(s=>Object.values(s.preferences.outputTokens||{}).includes(8000)));
     await settings.locator('#nav-diagnostics').click();await settings.locator('#trace-location').filter({hasText:'last-flow.json'}).waitFor();const tracePath=await settings.locator('#trace-location').innerText();const flow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.ok(flow.turns.length);assert.ok(!flow.user_question.includes('Reply OK.'));await settings.locator('#open-trace').click();
@@ -94,6 +122,9 @@ const root=path.resolve(__dirname,'..');
     const filterFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));
     const filterResult=JSON.parse(filterFlow.turns[1].request.Messages.filter(m=>m.role==='tool').at(-1).content);
     assert.deepEqual(filterResult.files,['README.md','filter-fixture.txt']);
+    await fs.writeFile(path.join(temp,'workspace','long-output.txt'),'retained-output-marker '.repeat(500));
+    scripted=[{action:'read_file',path:'long-output.txt'},{action:'finish',text:'Retained output fixture completed.'}];await frame.locator('#prompt').fill('Read long-output.txt');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Retained output fixture completed.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    const latestGroup=frame.locator('.activity-group').last();await latestGroup.locator(':scope > summary').click();await latestGroup.locator('.activity > summary').click();await latestGroup.getByRole('button',{name:'View full output'}).click();await window.locator('.tab.active').filter({hasText:/call-.*\.txt/}).waitFor();await fs.unlink(path.join(temp,'workspace','long-output.txt'));
     await fs.unlink(path.join(temp,'workspace','README.md'));await fs.unlink(path.join(temp,'workspace','filter-fixture.txt'));
     for(const permission of ['supervised','autonomous']){
       await choose('mode','Explore and implement');await choose('permission',permission==='supervised'?'Ask before editing':'Edit automatically');
@@ -160,6 +191,7 @@ const root=path.resolve(__dirname,'..');
     await window.locator('.quick-input-widget input[type="text"]').waitFor();await window.keyboard.press('Escape');
     await frame.locator('[data-task-action="undoChanges"]').click();await dialog.waitFor();await dialog.getByRole('button',{name:'Undo',exact:true}).click();
     for(let i=0;i<50;i++){try{await fs.access(path.join(temp,'workspace','nested','new-file.txt'));await new Promise(r=>setTimeout(r,100));}catch{break;}}
+    await frame.waitForFunction(()=>document.getElementById('stop').hidden&&document.getElementById('run-status').textContent==='Ready');
     await assert.rejects(fs.access(path.join(temp,'workspace','nested','new-file.txt')));assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     await frame.locator('#open-settings').click();const sameSettings=await findFrame('#nav-providers');assert.equal(sameSettings,settings);
     await settings.getByRole('button',{name:'Edit',exact:true}).click();await settings.locator('#provider-name').fill('Edited connection');await settings.locator('#save-provider').click();await settings.locator('.connection h3').filter({hasText:'Edited connection'}).waitFor();await settings.locator('#cancel-form').click();

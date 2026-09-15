@@ -2,7 +2,7 @@
   "name": "vortex-agent",
   "displayName": "Vortex",
   "description": "Seu agente de código, seus modelos. BYOK para VS Code.",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "publisher": "vortex-local",
   "engines": {
     "vscode": "^1.96.0"
@@ -24,7 +24,8 @@
     "icons": "node scripts/update-icons.cjs",
     "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.webview.json",
     "test:real": "npm run compile && node scripts/evaluate.cjs",
-    "test:sandbox": "npm run compile && node --test test/sandbox.cjs"
+    "test:sandbox": "npm run compile && node --test test/sandbox.cjs",
+    "benchmark": "npm run compile && node scripts/benchmark.cjs"
   },
   "activationEvents": [
     "onView:vortex.sidebar"

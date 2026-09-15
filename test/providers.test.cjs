@@ -99,3 +99,8 @@ test('conversation patches reject unsupported language, font values and unknown 
  for(const patch of [{uiLanguage:'fr'},{fontSize:99},{sendKey:'space'},{apiKey:'bad'}])assert.throws(()=>parseRequest({type:'setConversation',requestId:'test',patch}));
  assert.equal(parseRequest({type:'setConversation',requestId:'test',patch:{uiLanguage:'pt',language:'auto'}}).type,'setConversation');
 });
+
+test('missing connection referenced by saved selection does not prevent settings and history from loading',async()=>{
+ const {storage,manager}=setup();storage.values.set('modelPreferences',{selected:{providerId:'removed',modelId:'m'},manualModels:[{providerId:'removed',modelId:'m'}]});
+ const state=await manager.snapshot();assert.deepEqual(state.providers,[]);assert.deepEqual(state.effectiveProtocols,{});assert.equal(state.preferences.selected.providerId,'removed');
+});

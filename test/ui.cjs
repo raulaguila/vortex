@@ -22,7 +22,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
  try{
   browser=await chromium.launch({executablePath:require('./runtime-paths.cjs').chromePath(),headless:true});
-  const context=await browser.newContext();const pages=new Set();let settings,chat;const errors=[];let startCount=0,executionSaves=0,copied='';
+  const context=await browser.newContext();const pages=new Set();let settings,chat;const errors=[];let startCount=0,executionSaves=0,copied='',openedActivity;
   const manager=new ProviderManager(new Storage(),new Secrets(),async url=>new Response(JSON.stringify(url.includes('/models/')?{context_length:32768}: {data:[{id:'chat-model'},{id:'plan-model'}]})));
   const post=(page,m)=>page.isClosed()?Promise.resolve():page.evaluate(m=>window.dispatchEvent(new MessageEvent('message',{data:m})),m);
   const broadcast=async()=>{const state=await manager.snapshot();await Promise.all([...pages].filter(p=>!p.isClosed()).map(p=>post(p,{type:'state',state,busy:false})));};
@@ -30,6 +30,8 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   async function createPage(isSettings){
    const page=await context.newPage();pages.add(page);page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
    await page.exposeFunction('bridge',async raw=>{const m=parseRequest(raw);const ok=(message,providerId)=>post(page,{type:'result',requestId:m.requestId,ok:true,message,providerId});try{switch(m.type){
+    case 'openActivityOutput':openedActivity={sessionId:m.sessionId,activityId:m.activityId};await ok();return;
+    case 'recoveryInfo':await post(page,{type:'recoveryInfo',items:[]});return;
     case 'copyText':copied=m.text;await ok();return;
     case 'ready':await broadcast();if(isSettings)await post(page,{type:'settingsSection',section:'providers'});else await post(page,{type:'history',events:[],busy:false,status:'Ready'});return;
     case 'openSettings':if(!settings||settings.isClosed())settings=await createPage(true);await post(settings,{type:'settingsSection',section:m.section||'providers'});await ok();return;
@@ -107,6 +109,12 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
    for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});await chat.screenshot({path:path.join(output,`v2-${theme}-${width}-chat.png`)});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await chat.locator('#model-trigger').click();const box=await chat.locator('#model-picker').boundingBox();assert.ok(box.y>=0&&box.x>=0&&box.x+box.width<=width);await chat.screenshot({path:path.join(output,`v2-${theme}-${width}-models.png`)});await chat.locator('#close-picker').click();}
    for(const width of [480,800,1200]){await settings.setViewportSize({width,height:800});for(const section of ['providers','models','conversation','execution','diagnostics']){await settings.locator('#nav-'+section).click();await settings.screenshot({path:path.join(output,`v2-${theme}-${width}-${section}.png`)});assert.ok(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}}
   }
+  // Explicit truncation and storage failures remain understandable at narrow widths.
+  await post(chat,{type:'history',events:[{role:'user',text:'Inspect output'},{role:'activity',text:'',activity:{sessionId:sessions[0].id,id:'activity-fixture',runId:'run',name:'read_file',status:'success',output:'preview',outputRef:'11111111-1111-1111-1111-111111111111',truncated:true,startedAt:1,endedAt:2}}],busy:false,status:'Ready'});
+  await chat.locator('.activity-group > summary').click();await chat.locator('.activity > summary').click();await chat.getByRole('button',{name:'View full output'}).click();await chat.waitForTimeout(50);assert.deepEqual(openedActivity,{sessionId:sessions[0].id,activityId:'activity-fixture'});
+  await post(chat,{type:'persistenceState',failed:true});assert.equal(await chat.getByRole('alert').filter({hasText:'Progress could not be saved'}).isVisible(),true);
+  for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await chat.screenshot({path:path.join(output,`recovery-${width}.png`)});}
+  await post(chat,{type:'persistenceState',failed:false});assert.equal(await chat.getByRole('alert').filter({hasText:'Progress could not be saved'}).isVisible(),false);
   // Representative conversation and functional message actions.
   const longMessage='Please improve the account screen.\n'.repeat(24);
   await post(chat,{type:'history',events:[{role:'user',text:longMessage,timestamp:Date.now()},{role:'activity',text:'read_file · account.ts · success\nRead 80 lines.'},{role:'activity',text:'edit_file · account.ts · denied\nApproval denied.'},{role:'assistant',text:'## Account screen\nThe edit was **not applied** because approval was declined.\n\n- Existing files are unchanged.\n- You can review the proposed implementation.\n\n```ts\nconst enabled = true;\n```',timestamp:Date.now()}],busy:false,status:'Ready'});

@@ -3,7 +3,7 @@ const record=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Arr
 const str=(v:unknown)=>typeof v==='string';const num=(v:unknown)=>typeof v==='number'&&Number.isFinite(v);
 const bool=(v:unknown)=>typeof v==='boolean';const array=(v:unknown)=>Array.isArray(v)&&v.length<=10000;
 const model=(v:unknown)=>record(v)&&str(v.providerId)&&str(v.modelId);
-const activity=(v:unknown)=>record(v)&&str(v.runId)&&str(v.id)&&str(v.name)&&str(v.output)&&num(v.startedAt)&&num(v.endedAt)&&['success','error','denied','recovered','cancelled','uncertain'].includes(v.status);
+const activity=(v:unknown)=>record(v)&&str(v.runId)&&str(v.id)&&str(v.name)&&str(v.output)&&num(v.startedAt)&&num(v.endedAt)&&(v.operation===undefined||record(v.operation)&&str(v.operation.id)&&str(v.operation.path)&&['not_applied','applied','partial','uncertain'].includes(v.operation.outcome)&&['prepared','applying','applied','saved','recorded'].includes(v.operation.phase))&&(v.truncated===undefined||bool(v.truncated))&&(v.sessionId===undefined||str(v.sessionId))&&(v.outputRef===undefined||str(v.outputRef))&&['success','error','denied','recovered','cancelled','uncertain'].includes(v.status);
 const event=(v:unknown)=>record(v)&&['user','assistant','activity'].includes(v.role)&&str(v.text)&&(v.activity===undefined||activity(v.activity));
 /** Validate the webview boundary before touching DOM or persistent draft state. */
 export function isHostResponse(v:unknown):v is Response {
@@ -31,6 +31,8 @@ export function isHostResponse(v:unknown):v is Response {
  case 'settingsSection':return ['providers','models','conversation','execution','diagnostics'].includes(v.section);
  case 'taskState':return ['resume','implementPlan','reviewChanges','undoChanges'].every(k=>bool(v[k]));
  case 'traceInfo':return str(v.path)&&num(v.bytes)&&bool(v.exists);
+ case 'recoveryInfo':return array(v.items)&&v.items.every(i=>record(i)&&str(i.id)&&['backup','lock'].includes(i.kind));
+ case 'persistenceState':return typeof v.failed==='boolean';
  case 'storageInfo':return num(v.bytes)&&num(v.sessions)&&[0,30,90,180].includes(v.retentionDays);
  case 'chatTestResult':return str(v.requestId)&&bool(v.ok)&&num(v.elapsed)&&str(v.message)&&str(v.protocol);
  case 'toolsTestResult':return str(v.requestId)&&model(v.model)&&record(v.result)&&['chat','streaming','tools'].every(k=>['validated','failed','unverified'].includes(v.result[k]))&&num(v.result.elapsed)&&num(v.result.timestamp)&&str(v.result.message)&&str(v.result.protocol);

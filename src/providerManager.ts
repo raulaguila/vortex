@@ -61,7 +61,7 @@ export class ProviderManager {
   async snapshot(): Promise<SettingsState> {
     const providers=await Promise.all(this.providers().map(async p => ({...p,hasKey:!!await this.secrets.get('key:'+p.id),catalog:this.catalogs.get(p.id)||{status:'idle' as const,models:[]}})));
     const preferences=this.preferences(), selected=preferences.selected;
-    const refs=[...preferences.manualModels,...(selected?[selected]:[]),...providers.flatMap(p=>p.catalog.models.map(modelId=>({providerId:p.id,modelId}))),...Array.from(this.limits.keys(),key=>{const [providerId,modelId]=JSON.parse(key);return {providerId,modelId};})];
+    const refs=[...preferences.manualModels,...(selected?[selected]:[]),...providers.flatMap(p=>p.catalog.models.map(modelId=>({providerId:p.id,modelId}))),...Array.from(this.limits.keys(),key=>{const [providerId,modelId]=JSON.parse(key);return {providerId,modelId};})].filter(ref=>providers.some(p=>p.id===ref.providerId));
     const contextBudgets=Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.contextBudget(ref)]));
     return {diagnosticVersions:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.revision(ref)])),effectiveProtocols:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.toolProtocol(ref)])),selectedContext:selected?{model:selected,...this.contextBudget(selected)}:null,contextBudgets,limits:Object.fromEntries(this.limits),providers,preferences};
   }

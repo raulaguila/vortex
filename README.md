@@ -16,6 +16,17 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.10.0 — consolidação
+
+- Alterações têm registro durável por etapa. Se aplicar, salvar ou registrar falhar, a tarefa pausa para revisão; não repete a escrita nem desfaz automaticamente.
+- Conexões e preferências são gravadas juntas para evitar perda de cadastro após atualizações rápidas; chaves permanecem no SecretStorage.
+- Sessões mantêm a última cópia válida. **Diagnóstico → Recovery** permite restaurar uma cópia ou liberar um bloqueio vazio legado, com confirmação. O arquivo danificado é preservado.
+- Listagem e busca usam cursores associados à consulta, com cache de descoberta. A busca continua dentro de um arquivo quando o limite de resultados é atingido; arquivos omitidos são contabilizados.
+- Atividades indicam saída parcial e oferecem **View full output** no editor somente leitura. Falhas de gravação permanecem visíveis; Undo mantém a tarefa ocupada até terminar.
+- Avaliações repetem cenários e verificam resultados funcionais. `make benchmark` mede descoberta de 10.000 arquivos, 500 sessões e checkpoints de uma conversa longa.
+
+Veja [evidências, reprodução e validações pendentes](docs/validation-0.10.0.md). Os testes com provedores simulados não substituem a validação com o Ollama e o provedor corporativo usados no dia a dia.
+
 ## Versão 0.9.2
 
 O prompt inclui um guia em tópicos para escolher ferramentas, filtrado pelo modo. O workflow descreve a sequência de investigação; schemas continuam definindo argumentos e limites. O guia distingue localizar caminhos (`list_files`) de buscar texto dentro dos arquivos (`search_files`).
@@ -157,10 +168,11 @@ make test-ui
 make test-host
 make test-tls
 make test-sandbox
+make benchmark
 make package
 ```
 
-`make test-real` usa `VORTEX_EVAL_URL`, `VORTEX_EVAL_MODEL` e, opcionalmente, `VORTEX_EVAL_KIND` / `VORTEX_EVAL_KEY`. É uma execução manual, limitada a 24 requisições, que pode consumir créditos. Modelos são reais; ferramentas desse avaliador operam sobre fixtures em memória, sem shell nem arquivos do usuário. O teste do Extension Host cobre o executor real com provedor simulado.
+`make test-real` usa `VORTEX_EVAL_URL`, `VORTEX_EVAL_MODEL` e, opcionalmente, `VORTEX_EVAL_KIND`, `VORTEX_EVAL_KEY`, `VORTEX_EVAL_PROTOCOL` e `VORTEX_EVAL_TLS_INSECURE`. Por padrão são cinco repetições de oito cenários, com até 12 rodadas por turno e 20 chamadas de ferramentas; dois cenários têm dois turnos. É uma execução manual e pode consumir créditos. A aprovação exige pelo menos 4/5 em cada cenário e nenhuma violação de segurança. `VORTEX_EVAL_REPETITIONS` altera a amostra (1–20). Modelos são reais; ferramentas operam sobre fixtures em memória, sem shell nem arquivos do usuário. A correção aritmética é verificada pelo comportamento. O Extension Host cobre o executor real com provedor simulado.
 
 CI verifica compilação, contratos e pacote, com cobertura básica Windows e testes completos de unidade em macOS/Linux. Tags `v*` geram release com VSIX. Não há publicação automática no Marketplace.
 

@@ -9,8 +9,9 @@ export function migrateExecution(v:any):ExecutionPreferences{
  const merged={...d,...v,maxRounds:v.maxRounds??v.maxSteps??d.maxRounds,maxToolCalls:v.maxToolCalls??v.maxSteps??d.maxToolCalls,firstResponseTimeout:v.firstResponseTimeout??v.modelTimeout??d.firstResponseTimeout,idleTimeout:v.idleTimeout??v.modelTimeout??d.idleTimeout};
  return Object.fromEntries(Object.keys(d).map(k=>[k,validExecution({...d,[k]:merged[k]})?merged[k]:d[k as keyof ExecutionPreferences]])) as unknown as ExecutionPreferences;
 }
-export type FailureCode='cancelled'|'first_response_timeout'|'idle_timeout'|'task_timeout'|'command_timeout'|'transport'|'authentication'|'provider'|'invalid_response'|'tool_validation'|'uncertain_outcome';
-export class ExecutionError extends Error{constructor(readonly code:FailureCode,message:string,readonly retryable=false){super(message);this.name='ExecutionError';}}
+import type {OperationState} from './operation';
+export type FailureCode='cancelled'|'first_response_timeout'|'idle_timeout'|'task_timeout'|'command_timeout'|'transport'|'authentication'|'provider'|'invalid_response'|'tool_validation'|'uncertain_outcome'|'persistence';
+export class ExecutionError extends Error{constructor(readonly code:FailureCode,message:string,readonly retryable=false,readonly operation?:OperationState){super(message);this.name='ExecutionError';}}
 export async function awaitApproval<T>(request:()=>PromiseLike<T>,signal?:AbortSignal):Promise<T>{
  signal?.throwIfAborted();let cancel:()=>void=()=>{};
  try{return await Promise.race([Promise.resolve(request()),new Promise<never>((_,reject)=>{cancel=()=>reject(signal?.reason||new ExecutionError('cancelled','Cancelled.'));signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();})]);}

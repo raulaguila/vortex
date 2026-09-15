@@ -51,6 +51,7 @@ export class AgentRuntime {
   protected progress?:RunProgress;
   protected retryRequest?:Extract<Request,{type:'start'}>;
   protected retryStart?:number;
+  private persistenceFailed=false;
   async retry(requestId:string){if(!this.retryRequest||this.busy||this.session?.pendingTool)throw new Error('Review the task before continuing.');const request=this.retryRequest;this.retryRequest=undefined;await this.start({...request,requestId},[],true);}
 
   protected async approval<T>(request:()=>PromiseLike<T>):Promise<T>{
@@ -73,8 +74,26 @@ export class AgentRuntime {
     const selected=this.providers.preferences().selected||this.session.model;
     return this.start({type:'start',requestId,prompt:implement?'Implement the reviewed checklist. Preserve its scope and validate the changes.':'Continue the interrupted task from its saved progress. Verify the current workspace before making changes.',model:selected,mode:implement?'agent':this.session.mode,permission:this.session.permission});
   }
+  async activityOutput(sessionId:string,activityId:string){
+    const session=this.session?.id===sessionId?this.session:await this.sessions.load(sessionId);
+    const activity=(this.session?.id===sessionId?this.events:session.events).find(e=>e.activity?.id===activityId)?.activity;
+    if(!activity)throw new Error('Activity not found.');if(!activity.outputRef){if(activity.truncated)throw new Error('Full output was not retained.');return activity.output;}
+    const outputs=this.session?.id===sessionId?this.outputs:new ToolOutputs(this.artifactsDirectory?path.join(this.artifactsDirectory,sessionId,'outputs'):undefined);if(outputs!==this.outputs)await outputs.restore();
+    return outputs.full(activity.outputRef);
+  }
   async reviewChanges(){if(this.session)await this.reviews?.review(this.session.id);}
-  async undoChanges(){if(this.busy)throw new Error('Stop the task first.');const root=this.session?.root||this.host.roots()[0];if(root&&!this.host.roots().includes(root))throw new Error('Open the original workspace before undoing changes.');if(this.session&&root){const release=await this.sessions.begin?.(this.session);try{await this.reviews?.undo(this.session.id,root);await this.checkpoint();}finally{await release?.();}}await this.taskState();}
+  async undoChanges(){
+    if(this.busy)throw new Error('Stop the task first.');const session=this.session,root=session?.root||this.host.roots()[0];
+    if(root&&!this.host.roots().includes(root))throw new Error('Open the original workspace before undoing changes.');if(!session||!root)return;
+    this.startingRun=true;let release:(()=>Promise<void>)|undefined;
+    try{
+      release=await this.sessions.begin?.(session);this.run=new AbortController();this.status('Restoring task changes',true,'tool');
+      const previous=session.pendingTool;session.pendingTool={name:'undo'};await this.checkpoint();
+      const changed=await this.reviews?.undo(session.id,root,this.run.signal);session.pendingTool=changed?undefined:previous;await this.checkpoint();
+    }catch(error){session.runState='paused';try{await this.checkpoint();}catch{}this.post({type:'runFailure',code:error instanceof ExecutionError?error.code:'uncertain_outcome',message:error instanceof Error?error.message:'Undo interrupted. Review before continuing.',retryable:false});throw error;}
+    finally{this.run=undefined;this.startingRun=false;await release?.();this.status(session.pendingTool?'Review required':'Ready',false);await this.taskState();}
+  }
+
   stop() { if(this.startingRun)this.startingCancelled=true;this.run?.abort(new ExecutionError('cancelled','Task stopped by the user.')); }
   dispose() { this.stop(); }
   clear() { if (this.busy) throw new Error('Aguarde a tarefa terminar.'); this.retryRequest=undefined;this.retryStart=undefined;this.navigationVersion++;this.events = []; this.messages=[]; this.checklist=[]; this.session=undefined; this.post({type:'checklist',items:[]}); this.statusText = 'Pronto'; this.history(); }
@@ -84,16 +103,21 @@ export class AgentRuntime {
     if(revision!==this.taskStateRevision||session!==this.session)return;
     post({type:'taskState',resume:!this.busy&&!!session&&['paused','error'].includes(session.runState||''),implementPlan:!this.busy&&session?.mode==='plan'&&this.checklist.some(i=>i.status==='pending'),reviewChanges:!this.busy&&changes.reviewChanges,undoChanges:!this.busy&&changes.undoChanges});
   }
-  history(post = this.post) {if(this.progress&&this.busy)post({type:'runProgress',progress:this.progress});void this.taskState(post); post({type:'history',events:this.events,busy:this.busy,status:this.statusText}); post({type:'checklist',items:this.checklist}); if(this.session&&this.busy)post({type:'sessionLoaded',mode:this.session.mode,permission:this.session.permission,model:this.session.model}); }
+  history(post = this.post) {post({type:'persistenceState',failed:this.persistenceFailed});if(this.progress&&this.busy)post({type:'runProgress',progress:this.progress});void this.taskState(post); post({type:'history',events:this.events,busy:this.busy,status:this.statusText}); post({type:'checklist',items:this.checklist}); if(this.session&&this.busy)post({type:'sessionLoaded',mode:this.session.mode,permission:this.session.permission,model:this.session.model}); }
   async load(id:string){
     if(this.busy)throw new Error('Stop the current task before opening a session.');
     const revision=++this.navigationVersion,session=await this.sessions.load(id),readOnly=await this.sessions.isActive?.(id)||false;
+    let assessment:string|undefined;
+    if(!readOnly&&session.pendingTool&&session.root&&this.host.roots().includes(session.root)&&this.reviews){
+      try{const rows=await this.reviews.inspect(session.id,session.root);if(rows.length)assessment='Recovery assessment\n'+JSON.stringify(rows);}
+      catch{assessment='Recovery assessment unavailable. Review the workspace before continuing.';}
+    }
     if(this.busy||revision!==this.navigationVersion)throw new Error('Session navigation was superseded.');
     this.retryRequest=undefined;this.retryStart=undefined;this.session=session;this.events=session.events;this.messages=session.messages;this.checklist=session.checklist;
-    this.statusText=readOnly?'Session active in another window. Reload it when that task finishes.':'Ready';this.history();this.post({type:'sessionLoaded',readOnly,mode:session.mode,permission:session.permission,model:session.model});
+    this.statusText=readOnly?'Session active in another window. Reload it when that task finishes.':session.pendingTool?'Review required':'Ready';this.history();if(assessment)this.event('activity',assessment);this.post({type:'sessionLoaded',readOnly,mode:session.mode,permission:session.permission,model:session.model});
   }
   async removeSession(id:string) {if(this.busy)throw new Error('Stop the current task first.');await this.sessions.remove(id);if(this.session?.id===id)this.clear();}
-  protected async checkpoint() {await this.outputs.flush();if(this.session){this.session.events=this.events;this.session.messages=this.messages;this.session.checklist=this.checklist;await this.sessions.save(this.session);}}
+  protected async checkpoint() {try{await this.outputs.flush();if(this.session){this.session.events=this.events;this.session.messages=this.messages;this.session.checklist=this.checklist;await this.sessions.save(this.session);}this.persistenceFailed=false;this.post({type:'persistenceState',failed:false});}catch{this.persistenceFailed=true;this.post({type:'persistenceState',failed:true});throw new ExecutionError('persistence','Progress could not be saved. No further changes will run until storage is available.');}}
   protected event(role: AgentEvent['role'], text: string, durationMs?:number, activity?:ActivityData,failureCode?:string) { const event = {role,text,activity,failureCode,timestamp:Date.now(),...(durationMs===undefined?{}:{durationMs})}; this.events.push(event); this.post({type:'event',event}); }
   protected status(text:string,busy:boolean,phase:RunPhase='tool'){
     if(busy&&this.progress){const changed=this.progress.phase!==phase||this.progress.tool?.id!==this.activeTool?.id;this.progress={...this.progress,phase,phaseStartedAt:changed?Date.now():this.progress.phaseStartedAt,tool:this.activeTool};this.post({type:'runProgress',progress:this.progress});}
@@ -104,7 +128,7 @@ export class AgentRuntime {
     if(this.run)throw new Error('Já existe uma tarefa em execução.');
     if(!this.host.trusted())throw new Error('Confie no workspace antes de iniciar.');
 
-    if(this.session?.pendingTool){const current=this.session;const confirmed=await this.host.confirmUncertain();if(!confirmed)throw new Error('Review the workspace before continuing.');if(this.run||this.session!==current)throw new Error('Task changed during confirmation.');current.pendingTool=undefined;}
+    if(this.session?.pendingTool){const current=this.session;if(current.root&&this.reviews){const recovery=await this.reviews.inspect(current.id,current.root);if(recovery.length)this.event('activity','Recovery assessment\n'+JSON.stringify(recovery));}const confirmed=await this.host.confirmUncertain();if(!confirmed)throw new Error('Review the workspace before continuing.');if(this.run||this.session!==current)throw new Error('Task changed during confirmation.');current.pendingTool=undefined;}
     if(!isMode(msg.mode)||!isPermission(msg.permission))throw new Error('Modo inválido.');
     const mode=msg.mode;let root=this.session?.root||this.host.roots()[0];
     if(root&&!this.host.roots().includes(root))throw new Error('Open the original workspace to continue this task.');
@@ -224,11 +248,11 @@ export class AgentRuntime {
             result=await this.execute(action,mode,root,controller.signal,msg.permission);failures=0;
             if(registry[action.action].effect==='read'){const signature=JSON.stringify(action)+contentVersion(result);const count=(repetitions.get(signature)||0)+1;repetitions.set(signature,count);if(count>=3)throw new ApprovalDenied('Stopped because the same tool returned the same result three times. Refine the request before continuing.');}else repetitions.clear();
           }
-          catch(e){if(controller.signal.aborted||e instanceof ExecutionError&&['command_timeout','uncertain_outcome','cancelled','task_timeout'].includes(e.code))throw e;status=e instanceof ApprovalDenied?'denied':'error';result=(e as Error).message;failures++;}
+          catch(e){if(controller.signal.aborted||e instanceof ExecutionError&&['command_timeout','uncertain_outcome','cancelled','task_timeout','persistence'].includes(e.code))throw e;status=e instanceof ApprovalDenied?'denied':'error';result=(e as Error).message;failures++;}
           this.session.pendingTool=undefined;
           this.flushCommandOutput();this.post({type:'toolProgress',runId:this.progress?.runId,id:toolId,name:action.action,status,elapsed:Date.now()-started});this.activeTool=undefined;
-          this.event('activity','',Date.now()-started,{runId:msg.requestId,id:toolId,name:action.action,...('path' in action?{path:action.path}:{}),status,output:toolPresentation(action.action,result).slice(0,4000),startedAt:started,endedAt:Date.now()});
-          const output=this.outputs.preserve(result,this.outputLimit);
+          const output=this.outputs.preserve(result,Math.min(this.outputLimit,4000));let retained:{output_id?:string}={};try{retained=JSON.parse(output);}catch{}const presented=toolPresentation(action.action,result);
+          this.event('activity','',Date.now()-started,{sessionId:this.session.id,runId:msg.requestId,id:toolId,name:action.action,...('path' in action?{path:action.path}:{}),status,output:presented.slice(0,4000),outputRef:retained.output_id,truncated:presented.length>4000,startedAt:started,endedAt:Date.now()});
           messages.push({role:'user',content:JSON.stringify({toolResult:{status,output}}),...(turn?{toolResult:{id:turn.calls[index].id,name:turn.calls[index].name,status,output}}:{})});await this.checkpoint();
           if(status==='denied'){
             for(const c of turn?.calls.slice(index+1)||[])messages.push({role:'user',content:'Cancelled after denial.',toolResult:{id:c.id,name:c.name,status:'denied',output:'Cancelled after denial.'}});
@@ -247,12 +271,12 @@ export class AgentRuntime {
         }catch(error){if(controller.signal.aborted)throw error;this.event('activity','Progress summary unavailable\nThe saved tool results remain available.');}
       }
       if(!toolLimitReached)this.event('assistant',`Work round limit (${limits.maxRounds}) reached. Review progress and continue explicitly.`);
-    }catch(e){const failure=controller.signal.aborted?controller.signal.reason:e;outcome=controller.signal.aborted||failure instanceof ExecutionError&&['command_timeout','uncertain_outcome'].includes(failure.code)?'stopped':'error';if(this.activeTool){const terminalStatus=this.session.pendingTool&&!['read','interaction'].includes(registry[this.session.pendingTool.name as Action['action']]?.effect)?'uncertain':controller.signal.aborted?'cancelled':'error';const endedAt=Date.now(),startedAt=this.progress?.phaseStartedAt||endedAt;this.event('activity','',endedAt-startedAt,{runId:msg.requestId,...this.activeTool,status:terminalStatus,output:(failure instanceof Error?failure.message:'Interrupted.')+' Verify the workspace before repeating this action.',startedAt,endedAt});this.post({type:'toolProgress',runId:msg.requestId,...this.activeTool,status:terminalStatus,elapsed:endedAt-startedAt});}const retryable=failure instanceof ExecutionError&&failure.retryable&&!this.session.pendingTool&&!incompleteResponse;if(retryable)this.retryRequest=msg;else this.retryRequest=undefined;this.post({type:'runFailure',code:failure instanceof ExecutionError?failure.code:'invalid_response',message:failure instanceof Error?failure.message:'Execution failed.',retryable});this.event('assistant',failure instanceof Error?failure.message:'Execution failed.',undefined,undefined,failure instanceof ExecutionError?failure.code:'invalid_response');}finally{
+    }catch(e){const failure=controller.signal.aborted?controller.signal.reason:e;outcome=controller.signal.aborted||failure instanceof ExecutionError&&['command_timeout','uncertain_outcome','persistence'].includes(failure.code)?'stopped':'error';if(this.activeTool){const terminalStatus=this.session.pendingTool&&!['read','interaction'].includes(registry[this.session.pendingTool.name as Action['action']]?.effect)?'uncertain':controller.signal.aborted?'cancelled':'error';const endedAt=Date.now(),startedAt=this.progress?.phaseStartedAt||endedAt;this.event('activity','',endedAt-startedAt,{runId:msg.requestId,...this.activeTool,status:terminalStatus,operation:failure instanceof ExecutionError?failure.operation:undefined,output:(failure instanceof Error?failure.message:'Interrupted.')+' Verify the workspace before repeating this action.',startedAt,endedAt});this.post({type:'toolProgress',runId:msg.requestId,...this.activeTool,status:terminalStatus,elapsed:endedAt-startedAt});}const retryable=failure instanceof ExecutionError&&failure.retryable&&!this.session.pendingTool&&!incompleteResponse;if(retryable)this.retryRequest=msg;else this.retryRequest=undefined;this.post({type:'runFailure',code:failure instanceof ExecutionError?failure.code:'invalid_response',message:failure instanceof Error?failure.message:'Execution failed.',retryable});this.event('assistant',failure instanceof Error?failure.message:'Execution failed.',undefined,undefined,failure instanceof ExecutionError?failure.code:'invalid_response');}finally{
       // Close every native call/result group on interruption without claiming an action succeeded.
       for(let i=0;i<messages.length;i++)if(messages[i].toolCalls?.length){let end=i+1;while(end<messages.length&&messages[end].toolResult)end++;const answered=new Set(messages.slice(i+1,end).map(m=>m.toolResult?.id));const missing=messages[i].toolCalls!.filter(c=>!answered.has(c.id));messages.splice(end,0,...missing.map(c=>({role:'user' as const,content:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.',toolResult:{id:c.id,name:c.name,status:'error' as const,output:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.'}})));i=end+missing.length-1;}
       this.flushCommandOutput();if(trace)await trace.finish(outcome,messages);if(traceError)this.event('activity','Flow trace could not be saved.');
       if(this.session.pendingTool&&['read','interaction'].includes(registry[this.session.pendingTool.name as Action['action']]?.effect))this.session.pendingTool=undefined;
-      this.status('Finishing task',true,'finishing');try{await this.sandbox?.dispose();}catch{this.event('assistant','Sandbox cleanup failed. Temporary files may remain.');}this.sandbox=undefined;clearTimeout(deadline);this.session.runState=outcome==='stopped'?'paused':outcome;try{await this.checkpoint();}catch{this.event('assistant','Session could not be saved.');}this.run=undefined;this.activeTool=undefined;this.status(outcome==='error'?'Falha na execução':outcome==='stopped'?'Interrompido':'Concluído',false);this.post({type:'runEnd',requestId:msg.requestId,status:outcome});}
+      this.status('Finishing task',true,'finishing');try{await this.sandbox?.dispose();}catch{this.event('assistant','Sandbox cleanup failed. Temporary files may remain.');}this.sandbox=undefined;clearTimeout(deadline);this.session.runState=outcome==='stopped'?'paused':outcome;try{await this.checkpoint();}catch{outcome='stopped';this.session.runState='paused';this.event('assistant','Session could not be saved. Progress remains in memory; restore storage before continuing.');}this.run=undefined;this.activeTool=undefined;this.status(outcome==='error'?'Falha na execução':outcome==='stopped'?'Interrompido':'Concluído',false);this.post({type:'runEnd',requestId:msg.requestId,status:outcome});}
     }finally{await releaseSession?.();}
   }
   private commandChunks?:{runId:string;id:string;stream:'stdout'|'stderr';text:string};

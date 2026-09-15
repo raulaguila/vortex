@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');const Module=require('node:module');
-const mock={workspace:{textDocuments:[],fs:{stat:uri=>fs.stat(uri.fsPath)},findFiles:async()=>[]},Uri:{file:fsPath=>({fsPath})},RelativePattern:class{constructor(root,pattern){this.root=root;this.pattern=pattern;}},languages:{getDiagnostics:()=>[]}};
-const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool}=require('../dist/readTools');Module._load=load;
+const mock={commands:{executeCommand:async()=>[]},workspace:{textDocuments:[],fs:{stat:uri=>fs.stat(uri.fsPath)},findFiles:async()=>[]},Uri:{file:fsPath=>({fsPath})},RelativePattern:class{constructor(root,pattern){this.root=root;this.pattern=pattern;}},languages:{getDiagnostics:()=>[]}};
+const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool,invalidateFileQueries}=require('../dist/readTools');Module._load=load;
 test('reads use dirty buffers, record versions and expose line pagination',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-read-'));try{
   const file=path.join(root,'a.txt');await fs.writeFile(file,'disk');mock.workspace.textDocuments=[{uri:{fsPath:file},isDirty:true,getText:()=>Array.from({length:300},(_,i)=>'buffer'+i).join('\n')}];
@@ -45,4 +45,20 @@ test('diagnostics filters several literal paths and pages only matching diagnost
   const second=JSON.parse(await executeReadTool({...action,offset:1},root,new AbortController().signal));
   assert.equal(second.items[0].file,'c.ts');assert.equal(second.next_offset,null);
  }finally{mock.languages.getDiagnostics=()=>[];await fs.rm(root,{recursive:true,force:true});}
+});
+
+test('search cursors continue inside a truncated file without gaps or duplicate matches',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-cursor-'));try{
+  await fs.writeFile(path.join(root,'a.txt'),'needle\n'.repeat(2201));let discoveries=0;mock.workspace.findFiles=async()=>{discoveries++;return [{fsPath:path.join(root,'a.txt')}];};
+  const action={action:'search_files',query:'needle'};let cursor,lines=[];
+  do{const page=JSON.parse(await executeReadTool({...action,cursor},root,new AbortController().signal));lines.push(...page.matches.map(m=>m.line));cursor=page.next_cursor;}while(cursor);
+  assert.equal(discoveries,1);assert.equal(lines.length,2201);assert.equal(new Set(lines).size,2201);assert.equal(lines.at(-1),2201);
+  const first=JSON.parse(await executeReadTool(action,root,new AbortController().signal));invalidateFileQueries();await assert.rejects(executeReadTool({...action,cursor:first.next_cursor},root,new AbortController().signal),/expired/);
+ }finally{invalidateFileQueries();await fs.rm(root,{recursive:true,force:true});}
+});
+test('symbol queries include nested methods and containers',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-symbols-'));try{
+  await fs.writeFile(path.join(root,'a.ts'),'class A {}');mock.commands.executeCommand=async()=>[{name:'A',kind:4,range:{start:{line:0,character:0}},children:[{name:'method',kind:5,range:{start:{line:1,character:2}}}]}];
+  const result=JSON.parse(await executeReadTool({action:'query_symbols',path:'a.ts'},root,new AbortController().signal));assert.deepEqual(result.items.map(i=>i.name),['A','method']);assert.equal(result.items[1].container,'A');assert.equal(result.items[1].line,2);
+ }finally{await fs.rm(root,{recursive:true,force:true});}
 });
