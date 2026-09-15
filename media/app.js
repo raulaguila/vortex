@@ -12,12 +12,25 @@ const pending=new Map(),session='chat:'+Date.now().toString(36)+Math.random().to
 const same=(a,b)=>!!a&&!!b&&a.providerId===b.providerId&&a.modelId===b.modelId;
 const modelKey=m=>JSON.stringify([m.providerId,m.modelId]);
 const create=(tag,className,text)=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
+const runProgress=create('div','run-progress');runProgress.id='run-progress';runProgress.hidden=true;
+const progressSpinner=create('span','progress-spinner');progressSpinner.setAttribute('aria-hidden','true');
+const progressLabel=create('span','progress-label');progressLabel.setAttribute('role','status');progressLabel.setAttribute('aria-live','polite');
+runProgress.append(progressSpinner,progressLabel);$('timeline').after(runProgress);
+let progressText='Preparing request';
+const progressTranslations={'Preparing request':'Preparando solicitação','Preparing context':'Preparando contexto','Waiting for model':'Aguardando o modelo','Receiving response':'Recebendo resposta','Summarizing context':'Resumindo contexto','Waiting for approval':'Aguardando sua aprovação','Listing files':'Listando arquivos','Reading file':'Lendo arquivo','Searching files':'Pesquisando arquivos','Checking diagnostics':'Verificando diagnósticos','Updating plan':'Atualizando plano','Writing file':'Gravando arquivo','Editing file':'Editando arquivo','Removing file':'Removendo arquivo','Running command':'Executando comando','Running tool':'Executando ferramenta','Finishing task':'Finalizando tarefa','Enviando…':'Enviando…','Interrompendo…':'Interrompendo…','Trabalhando':'Preparando solicitação'};
+function showProgress(active,text){
+ if(text)progressText=text;runProgress.hidden=!active;
+ const [label,...detail]=progressText.split(' · '),pt=window.VortexUI.language()==='pt';
+ const localized=pt?(progressTranslations[label]||label):({'Enviando…':'Sending…','Interrompendo…':'Stopping…','Trabalhando':'Preparing request'}[label]||label);
+ progressLabel.textContent=[localized,...detail].join(' · ');progressLabel.title=progressLabel.textContent;
+ runProgress.classList.toggle('awaiting-approval',label==='Waiting for approval');
+}
 function request(type,data={},context={}){const requestId=session+':'+(++sequence);if(!['ready','stop','listSessions','openLink'].includes(type))pending.set(requestId,{type,...context});vscode.postMessage({type,requestId,...data});return requestId;}
 function persist(){vscode.setState({draft:$('prompt').value,mode:$('mode').value,permission:$('permission').value,initialized:true});}
 function notice(id,text='',error=false){$(id).textContent=text;$(id).classList.toggle('error',error);}
 function autosize(){$('prompt').style.height='auto';$('prompt').style.height=Math.min($('prompt').scrollHeight,220,window.innerHeight*.35)+'px';}
 function updatePermissions(){$('permission').hidden=true;$('permission-trigger').hidden=false;$('read-only').hidden=true;updateChoiceLabels();persist();}
-function updateBusy(value,text){busy=value;if(text)$('run-status').textContent=text;$('send').hidden=value;$('stop').hidden=!value;$('stop').disabled=false;for(const id of ['mode','mode-trigger','permission','permission-trigger','model-trigger','new-task','close-chat'])$(id).disabled=value||starting||modeChanging||clearing;$('send').disabled=value||starting||modeChanging||clearing||!$('prompt').value.trim();}
+function updateBusy(value,text){busy=value;showProgress(value||starting,text);if(text)$('run-status').textContent=value?progressLabel.textContent:text;$('send').hidden=value;$('stop').hidden=!value;$('stop').disabled=false;for(const id of ['mode','mode-trigger','permission','permission-trigger','model-trigger','new-task','close-chat'])$(id).disabled=value||starting||modeChanging||clearing;$('send').disabled=value||starting||modeChanging||clearing||!$('prompt').value.trim();}
 function messageAction(icon,label,handler){
  const button=create('button','icon-button message-action');button.title=window.VortexUI.t(label);button.setAttribute('aria-label',window.VortexUI.t(label));
  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('aria-hidden','true');const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href','#i-'+icon);svg.append(use);button.append(svg);button.onclick=handler;return button;
@@ -108,7 +121,7 @@ function submit(){if(busy||starting||modeChanging||clearing)return;const prompt=
 $('open-settings').onclick=()=>request('openSettings');$('connect-welcome').onclick=()=>request('openSettings');$('manage-models').onclick=()=>{closePicker();request('openSettings',{section:'models'});};
 $('mode').onchange=changeMode;$('permission').onchange=persist;
 $('model-trigger').onclick=()=>{$('model-picker').hidden?openPicker():closePicker();};$('close-picker').onclick=()=>closePicker();$('model-search').oninput=renderModels;
-$('send').onclick=submit;$('stop').onclick=()=>{request('stop');$('stop').disabled=true;$('run-status').textContent='Interrompendo…';};
+$('send').onclick=submit;$('stop').onclick=()=>{request('stop');$('stop').disabled=true;showProgress(true,'Interrompendo…');$('run-status').textContent=progressLabel.textContent;};
 function returnHome(){if(busy||starting||clearing)return;closePicker(false);closeChoices();clearing=true;$('mode').value='ask';updatePermissions();request('clear',{mode:'ask'});loadSessions('');updateBusy(busy);}
 $('new-task').onclick=returnHome;$('close-chat').onclick=returnHome;
 $('prompt').oninput=()=>{persist();autosize();updateBusy(busy);};
@@ -192,7 +205,6 @@ window.addEventListener('message',({data:m})=>{
   const follow=$('timeline').scrollHeight-$('timeline').scrollTop-$('timeline').clientHeight<100;
   row.text+=m.text;row.element.replaceChildren(markdownBody(row.text,'assistant'));if(follow)$('timeline').scrollTop=$('timeline').scrollHeight;
  }
- if(m.type==='toolProgress')$('run-status').textContent=m.name+' · '+m.status+(m.elapsed===undefined?'':' · '+(m.elapsed/1000).toFixed(1)+'s');
 });
 
 const taskActions=create('div','task-actions');

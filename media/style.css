@@ -251,3 +251,11 @@ article.assistant .message-content { padding:0; }
 .attached-context{display:flex;gap:4px;flex-wrap:wrap}.context-chip{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 
 .composer-meta > button:first-child{font-size:11px;padding:1px 3px}
+/* Live execution feedback remains visible while the user scrolls the conversation. */
+.run-progress { display:flex;align-items:center;gap:8px;margin:6px var(--vortex-gutter,16px) 10px;color:var(--vscode-descriptionForeground);font-size:12px;flex-shrink:0;min-width:0; }
+.run-progress[hidden] { display:none; }
+.progress-label { min-width:0;overflow-wrap:anywhere; }
+.progress-spinner { width:12px;height:12px;flex-shrink:0;border:1.5px solid var(--vscode-descriptionForeground);border-top-color:transparent;border-radius:50%;animation:vortex-progress-spin 1s linear infinite; }
+.awaiting-approval .progress-spinner { animation:none;border-color:var(--vscode-focusBorder); }
+@keyframes vortex-progress-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .progress-spinner { animation:none; } }
