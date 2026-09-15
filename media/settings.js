@@ -175,9 +175,10 @@ $('context-source').onchange=()=>{const api=$('context-source').value==='api';$(
 $('save-context').onclick=()=>{const model=contextRef();if(!model||!$('context-tokens').reportValidity())return;request('setContext',{model,source:$('context-source').value,tokens:Number($('context-tokens').value)});};
 
 const executionForm=create('form','execution-settings');executionForm.append(create('h2','','Execution limits'));
-for(const [name,label,value,min,max] of [['maxSteps','Steps per turn',20,1,200],['commandTimeout','Command timeout (seconds)',60,1,3600],['taskTimeout','Task timeout (seconds)',1800,1,86400],['tokenBudget','Token budget (empty = unlimited)','',1024,100000000]]){
+for(const [name,label,value,min,max] of [['maxSteps','Steps per turn',20,1,200],['modelTimeout','Model response timeout (seconds)',120,1,3600],['commandTimeout','Command timeout (seconds)',60,1,3600],['taskTimeout','Task timeout (seconds)',1800,1,86400],['tokenBudget','Token budget (empty = unlimited)','',1024,100000000]]){
  const labelEl=create('label','',label),input=create('input');input.type='number';input.min=min;input.max=max;input.value=value;input.name=name;if(name!=='tokenBudget')input.required=true;labelEl.append(input);executionForm.append(labelEl);
 }
+executionForm.append(create('p','','Model timeout applies to each response, including streaming, starting with the next task. The total task limit can interrupt it earlier.'));
 const saveExecution=create('button','','Save execution limits');saveExecution.type='submit';executionForm.append(saveExecution);$('section-conversation').append(executionForm);
 executionForm.onsubmit=e=>{e.preventDefault();const values=Object.fromEntries([...executionForm.elements].filter(e=>e.name).map(e=>[e.name,e.value===''?null:Number(e.value)]));request('setExecution',{execution:values});};
 window.addEventListener('message',({data:m})=>{if(m.type==='state'&&m.state.preferences.execution&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});

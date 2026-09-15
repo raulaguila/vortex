@@ -16,7 +16,7 @@ export function validateUrl(value: string): string {
   return u.toString().replace(/\/$/, '');
 }
 export class Client {
-  constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void) {}
+  constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void, private modelTimeout=120) {}
   private async request(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
     const headers: Record<string,string> = {'Content-Type':'application/json'};
     if(this.p.kind==='anthropic') { headers['x-api-key']=this.key; headers['anthropic-version']='2023-06-01'; }
@@ -24,15 +24,18 @@ export class Client {
     else if(this.key) headers.Authorization=`Bearer ${this.key}`;
     const requestId=randomUUID(),started=Date.now();const operation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path)?'generation':'metadata';
     this.log?.({event:'providerRequest',requestId,kind:this.p.kind,operation,attempt});
+    const timeoutMs=operation==='generation'?this.modelTimeout*1000:signal?120000:30000;
+    const timeoutSignal=AbortSignal.timeout(timeoutMs),requestSignal=signal?AbortSignal.any([signal,timeoutSignal]):timeoutSignal;
+    const timeoutError=()=>new Error(operation==='generation'?`${this.p.name}: tempo de resposta do modelo esgotado (${this.modelTimeout}s). Ajuste em Configurações → Conversa → Limites de execução.`:`${this.p.name}: tempo de conexão esgotado. Tente novamente.`);
     let response: Response;
     try {
-      const options: RequestInit = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(30000),redirect:'manual'};
+      const options: RequestInit = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:requestSignal,redirect:'manual'};
       const url=`${validateUrl(this.p.baseUrl)}${path}`;
       response = await (this.transport?this.transport(url,options):this.p.kind==='compatible'?compatibleRequest(url,options,!!this.p.tlsInsecure):fetch(url,options));
     } catch (error) {
       this.log?.({event:'providerTransportError',requestId,elapsed:Date.now()-started,cancelled:!!signal?.aborted});
       if(signal?.aborted) throw error;
-      if(error instanceof Error && error.name === 'TimeoutError') throw new Error(`${this.p.name}: tempo de conexão esgotado. Tente novamente.`);
+      if(timeoutSignal.aborted||error instanceof Error && error.name === 'TimeoutError') throw timeoutError();
       throw new Error(`${this.p.name}: conexão indisponível. ${connectionError(error)}`);
     }
     this.log?.({event:'providerResponse',requestId,httpStatus:response.status,elapsed:Date.now()-started});
@@ -48,7 +51,7 @@ export class Client {
       await response.body?.cancel().catch(()=>undefined);throw new Error(`${this.p.name}: HTTP ${response.status}. ${detail}`);
     }
     try { const result=consume?await consume(response):await response.json();if(operation==='generation')this.log?.({event:'providerResponseShape',requestId,elapsed:Date.now()-started,...responseMetadata(this.p.kind,result)});return result; }
-    catch { signal?.throwIfAborted();throw new Error(`${this.p.name}: resposta inválida da API. Verifique a URL base.`); }
+    catch { signal?.throwIfAborted();if(timeoutSignal.aborted)throw timeoutError();throw new Error(`${this.p.name}: resposta inválida da API. Verifique a URL base.`); }
   }
   async models(): Promise<string[]> {
     const all:string[]=[];

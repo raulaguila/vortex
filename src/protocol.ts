@@ -4,8 +4,8 @@ import {Mode,Permission,isMode,isPermission} from './policy';
 export interface ModelRef { providerId: string; modelId: string }
 export type ChatMode = Mode;
 export interface ConversationPreferences { language: 'pt' | 'en' | 'es' | 'auto'; uiLanguage: 'en' | 'pt'; fontSize: number | null; sendKey: 'enter' | 'modifierEnter' }
-export interface ExecutionPreferences {maxSteps:number;commandTimeout:number;taskTimeout:number;tokenBudget:number|null}
-export const defaultExecution=():ExecutionPreferences=>({maxSteps:20,commandTimeout:60,taskTimeout:1800,tokenBudget:null});
+export interface ExecutionPreferences {maxSteps:number;modelTimeout:number;commandTimeout:number;taskTimeout:number;tokenBudget:number|null}
+export const defaultExecution=():ExecutionPreferences=>({maxSteps:20,modelTimeout:120,commandTimeout:60,taskTimeout:1800,tokenBudget:null});
 export interface Preferences { execution?:ExecutionPreferences; toolProtocols?: Record<string,'auto'|'native'|'compatibility'>; selected: ModelRef | null; favorites: ModelRef[]; manualModels: ModelRef[]; defaults: Record<ChatMode, ModelRef | null>; conversation: ConversationPreferences; context: Record<string, {source: 'api' | 'custom'; tokens: number}> }
 export const defaultConversation = (): ConversationPreferences => ({language: 'auto', uiLanguage: 'en', fontSize: null, sendKey: 'enter'});
 export interface ProviderInput { id?: string; name: string; kind: Kind; baseUrl: string; key: string; clearKey: boolean; tlsInsecure?: boolean }
@@ -94,7 +94,7 @@ export function parseRequest(v: unknown): Request {
     case 'attachContext':case 'setupSandbox':valid=true;break;
     case 'removeContext':valid=string(v.id);break;
     case 'resume':case 'implementPlan':case 'reviewChanges':case 'undoChanges':valid=true;break;
-    case 'setExecution': {const e=v.execution;valid=record(e)&&Number.isInteger(e.maxSteps)&&Number(e.maxSteps)>=1&&Number(e.maxSteps)<=200&&Number.isInteger(e.commandTimeout)&&Number(e.commandTimeout)>=1&&Number(e.commandTimeout)<=3600&&Number.isInteger(e.taskTimeout)&&Number(e.taskTimeout)>=1&&Number(e.taskTimeout)<=86400&&(e.tokenBudget===null||Number.isSafeInteger(e.tokenBudget)&&Number(e.tokenBudget)>=1024);break;}
+    case 'setExecution': {const e=v.execution;valid=record(e)&&Number.isInteger(e.modelTimeout)&&Number(e.modelTimeout)>=1&&Number(e.modelTimeout)<=3600&&Number.isInteger(e.maxSteps)&&Number(e.maxSteps)>=1&&Number(e.maxSteps)<=200&&Number.isInteger(e.commandTimeout)&&Number(e.commandTimeout)>=1&&Number(e.commandTimeout)<=3600&&Number.isInteger(e.taskTimeout)&&Number(e.taskTimeout)>=1&&Number(e.taskTimeout)<=86400&&(e.tokenBudget===null||Number.isSafeInteger(e.tokenBudget)&&Number(e.tokenBudget)>=1024);break;}
     case 'setToolProtocol': valid=isModelRef(v.model)&&['auto','native','compatibility'].includes(String(v.protocol));break;
     case 'modelInfo': valid = isModelRef(v.model); break;
     case 'setContext': valid = isModelRef(v.model) && ['api','custom'].includes(String(v.source)) && typeof v.tokens === 'number' && Number.isInteger(v.tokens) && v.tokens >= 1024 && v.tokens <= 10000000; break;

@@ -99,3 +99,7 @@ Os modos compartilham contratos validados, mantendo Ask e Plan sem escrita. O ag
 Skills de projeto opcionais ficam em `.vortex/skills/<nome>/SKILL.md` e são carregadas sob demanda. Não alteram permissões. Os botões de continuidade, revisão e desfazer aparecem conforme o estado da tarefa.
 
 Consulte [validação e limites da versão](docs/validation-0.5.0.md) e a [comparação técnica das referências](docs/agent-comparison.md).
+
+### Timeout do modelo (0.5.2)
+
+Em **Configurações → Conversa → Limites de execução**, configure **Tempo de resposta do modelo (segundos)**: padrão 120, mínimo 1 e máximo 3.600. O valor é aplicado a partir da próxima tarefa, a cada tentativa de resposta do modelo, incluindo streaming e resumos de contexto. O limite total da tarefa pode interromper a execução antes desse prazo. O timeout de comandos e as consultas de catálogo continuam independentes. Stop permanece disponível.

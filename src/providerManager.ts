@@ -24,7 +24,7 @@ export class ProviderManager {
     if(this.prefsCache) return structuredClone(this.prefsCache);
     const fallback = emptyPreferences();
     const stored = this.storage.get<Partial<Preferences>>('modelPreferences', {});
-    this.prefsCache={...fallback, ...stored, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation}};
+    this.prefsCache={...fallback, ...stored, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation},execution:{...defaultExecution(),...stored.execution,modelTimeout:Number.isInteger(stored.execution?.modelTimeout)&&Number(stored.execution?.modelTimeout)>=1&&Number(stored.execution?.modelTimeout)<=3600?stored.execution!.modelTimeout:120}};
     return structuredClone(this.prefsCache);
   }
   private async persistPreferences(value: Preferences): Promise<void> {
@@ -91,7 +91,7 @@ export class ProviderManager {
   async setToolProtocol(model:ModelRef,protocol:'auto'|'native'|'compatibility') {
     await this.serial(async()=>{this.find(model.providerId);this.unsupportedTools.delete(JSON.stringify([model.providerId,model.modelId]));const p=this.preferences();await this.persistPreferences({...p,toolProtocols:{...p.toolProtocols,[JSON.stringify([model.providerId,model.modelId])]:protocol}});});
   }
-  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport,this.log); }
+  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport,this.log,this.preferences().execution?.modelTimeout??120); }
   private async resolve(input: ProviderInput): Promise<{provider: Provider; key: string}> {
     const existing = input.id ? this.find(input.id) : undefined;
     if (input.clearKey && !['ollama','compatible'].includes(input.kind)) throw new Error('Este provedor exige uma API key.');
