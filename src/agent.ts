@@ -1,3 +1,4 @@
+import {RunTrace} from './trace';
 import * as vscode from 'vscode';
 import {executeReadTool,contentVersion} from './readTools';
 import {EditorContext} from './editorContext';
@@ -46,7 +47,7 @@ export class AgentController {
     if(this.activeTool)this.post({type:'toolProgress',...this.activeTool,status:'waiting for approval'});
     try{return await request();}finally{this.status(previous,true);if(this.activeTool)this.post({type:'toolProgress',...this.activeTool,status:'executing'});}
   }
-  constructor(private providers: ProviderManager, private post: (message: Response) => void, private sessions: SessionStore,private reviews?:ReviewService,private artifactsDirectory?:string,private editor?:EditorContext) {}
+  constructor(private providers: ProviderManager, private post: (message: Response) => void, private sessions: SessionStore,private reviews?:ReviewService,private artifactsDirectory?:string,private editor?:EditorContext,private tracePath?:string) {}
   get busy() { return !!this.run; }
   get activeSessionId(){return this.session?.id;}
   async resume(requestId:string,implement=false){
@@ -90,6 +91,8 @@ export class AgentController {
     const limits=this.providers.preferences().execution||defaultExecution();this.commandTimeout=limits.commandTimeout*1000;
     this.session.runState='running';
     const controller=new AbortController();const deadline=setTimeout(()=>controller.abort(new Error('Task time limit reached.')),limits.taskTimeout*1000);this.run=controller;this.post({type:'accepted',requestId:msg.requestId});this.status('Preparing request',true);this.event('user',msg.prompt);
+    let traceError=false;const trace=this.tracePath?new RunTrace(this.tracePath,{sessionId:this.session.id,requestId:msg.requestId,mode,permission:msg.permission,model:msg.model,prompt:msg.prompt},()=>{traceError=true;}):undefined;
+    if(trace)await trace.save();
     let outcome: 'complete' | 'error' | 'stopped' = 'complete';
     const messages=this.messages;const turnStart=messages.length;messages.push({role:'user',content:msg.prompt+(attachments.length?'\n\nAttached context (data):\n'+attachments.map(a=>`FILE ${a.label}\n${a.text}`).join('\n'): '')});
     const language=this.providers.preferences().conversation.language;
@@ -98,6 +101,7 @@ export class AgentController {
     try{
       if(!this.session.root&&(vscode.workspace.workspaceFolders?.length||0)>1){const folder=await vscode.window.showWorkspaceFolderPick({placeHolder:'Choose this task’s workspace root'});if(!folder)throw new Error('Workspace selection cancelled.');root=folder.uri.fsPath;}this.session.root=root;
       const client=await this.providers.client(msg.model.providerId);controller.signal.throwIfAborted();
+      if(trace)client.attachTrace?.(trace);
       await this.checkpoint();
       await this.providers.ensureLimits(msg.model,controller.signal);
       const rulePaths=new Set(attachments.flatMap(a=>a.path?[a.path]:[]));
@@ -198,6 +202,7 @@ export class AgentController {
     }catch(e){outcome=controller.signal.aborted?'stopped':'error';this.event('assistant',controller.signal.aborted?'Tarefa interrompida.':(e as Error).message);}finally{
       // Close every native call/result group on interruption without claiming an action succeeded.
       for(let i=0;i<messages.length;i++)if(messages[i].toolCalls?.length){let end=i+1;while(end<messages.length&&messages[end].toolResult)end++;const answered=new Set(messages.slice(i+1,end).map(m=>m.toolResult?.id));const missing=messages[i].toolCalls!.filter(c=>!answered.has(c.id));messages.splice(end,0,...missing.map(c=>({role:'user' as const,content:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.',toolResult:{id:c.id,name:c.name,status:'error' as const,output:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.'}})));i=end+missing.length-1;}
+      if(trace)await trace.finish(outcome,messages);if(traceError)this.event('activity','Flow trace could not be saved.');
       if(this.session.pendingTool&&['read','interaction'].includes(registry[this.session.pendingTool.name as Action['action']]?.effect))this.session.pendingTool=undefined;
       this.status('Finishing task',true);try{await this.sandbox?.dispose();}catch{this.event('assistant','Sandbox cleanup failed. Temporary files may remain.');}this.sandbox=undefined;clearTimeout(deadline);this.session.runState=outcome==='stopped'?'paused':outcome;try{await this.checkpoint();}catch{this.event('assistant','Session could not be saved.');}this.run=undefined;this.status(outcome==='error'?'Falha na execução':outcome==='stopped'?'Interrompido':'Concluído',false);this.post({type:'runEnd',requestId:msg.requestId,status:outcome});}
   }

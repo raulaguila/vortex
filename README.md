@@ -109,3 +109,11 @@ Consulte [validação e limites da versão](docs/validation-0.5.0.md) e a [compa
 ### Timeout do modelo (0.5.2)
 
 Em **Configurações → Conversa → Limites de execução**, configure **Tempo de resposta do modelo (segundos)**: padrão 120, mínimo 1 e máximo 3.600. O valor é aplicado a partir da próxima tarefa, a cada tentativa de resposta do modelo, incluindo streaming e resumos de contexto. O limite total da tarefa pode interromper a execução antes desse prazo. O timeout de comandos e as consultas de catálogo continuam independentes. Stop permanece disponível.
+
+### Último fluxo da IA (0.6.1)
+
+Cada mensagem inicia um novo `last-flow.json` no armazenamento local do workspace do Vortex, substituindo o anterior. Abra pela paleta: **Vortex: Open last AI flow (JSON)**. Para guardar uma execução antes da próxima mensagem, use Salvar como.
+
+O formato segue o exemplo de rastreamento: `conversation_id`, `model`, `temperature`, `max_tokens`, `system_prompt`, `user_question`, `turns` (request/response), `final_answer` e `sources`. Cada rodada contém o histórico enviado, definições de ferramentas e resposta recebida, normalizados entre provedores. Streaming é registrado como resposta acumulada, sem eventos individuais. Parâmetros não enviados ficam `null`; falhas ficam na resposta da rodada. Retentativas HTTP internas pertencem à mesma rodada.
+
+O arquivo é atualizado antes e depois de cada chamada, inclusive nas chamadas de resumo. Não inclui headers de autenticação e remove a chave configurada. Pode conter código, prompts e dados retornados pelas ferramentas; revise antes de compartilhar. Não é enviado automaticamente nem incluído no repositório. Falha de gravação é informada sem interromper o agente.

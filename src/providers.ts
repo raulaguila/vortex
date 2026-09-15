@@ -1,3 +1,4 @@
+import {RunTrace} from './trace';
 import {compatibilityAnswer,responseMetadata} from './chatResponse';
 import {randomUUID} from 'node:crypto';
 import type {ModelLimits} from './protocol';
@@ -17,7 +18,16 @@ export function validateUrl(value: string): string {
 }
 export class Client {
   constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void, private modelTimeout=120) {}
-  private async request(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
+  private trace?:RunTrace;
+  attachTrace(trace:RunTrace){this.trace=trace;trace.addSecret(this.key);}
+  private async request(path:string,body?:unknown,signal?:AbortSignal,consume?:(response:Response)=>Promise<unknown>):Promise<any>{
+    const generation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path);
+    const trace=generation?this.trace:undefined;
+    const index=trace?await trace.request(path,body):undefined;
+    try{const result=await this.requestImpl(path,body,signal,consume);if(trace)await trace.response(index!,result,undefined,this.p.kind);return result;}
+    catch(error){if(trace)await trace.response(index!,undefined,error instanceof Error?error.message:String(error));throw error;}
+  }
+  private async requestImpl(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
     const headers: Record<string,string> = {'Content-Type':'application/json'};
     if(this.p.kind==='anthropic') { headers['x-api-key']=this.key; headers['anthropic-version']='2023-06-01'; }
     else if(this.p.kind==='gemini') headers['x-goog-api-key']=this.key;
@@ -39,7 +49,7 @@ export class Client {
       throw new Error(`${this.p.name}: conexão indisponível. ${connectionError(error)}`);
     }
     this.log?.({event:'providerResponse',requestId,httpStatus:response.status,elapsed:Date.now()-started});
-    if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await delay(250*(2**attempt),undefined,{signal});return this.request(path,body,signal,consume,attempt+1);}
+    if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await delay(250*(2**attempt),undefined,{signal});return this.requestImpl(path,body,signal,consume,attempt+1);}
     if(!response.ok) {
       if([400,422].includes(response.status)&&body&&typeof body==='object'&&'tools' in body){
         const text=(await response.text()).slice(0,16384);if(/(?:does not support|unsupported|not supported)[^\n]{0,80}(?:tools|function.call)|(?:tools|function.call)[^\n]{0,80}(?:not supported|unsupported)/i.test(text))throw new ToolsUnsupported();

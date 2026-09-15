@@ -35,6 +35,8 @@ class VortexController implements vscode.WebviewViewProvider {
   private settingsSection: 'providers' | 'models' | 'conversation' = 'providers';
   constructor(private ctx: vscode.ExtensionContext) {
     this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    const traceUri=vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json');
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.openLastFlow',async()=>{try{await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(traceUri));}catch{void vscode.window.showInformationMessage('No saved flow yet. Send a message to Vortex first.');}}));
     const output=vscode.window.createOutputChannel('Vortex');ctx.subscriptions.push(output);
     const diagnostics:string[]=[];const log=(record:Record<string,unknown>)=>{const line=JSON.stringify({time:new Date().toISOString(),...record});diagnostics.push(line);if(diagnostics.length>1000)diagnostics.shift();output.appendLine(line);};
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.diagnostics',()=>output.show()),vscode.commands.registerCommand('vortex.exportDiagnostics',async()=>{const doc=await vscode.workspace.openTextDocument({language:'jsonl',content:diagnostics.join('\n')});await vscode.window.showTextDocument(doc);}));
@@ -59,7 +61,7 @@ class VortexController implements vscode.WebviewViewProvider {
       if(message.type === 'accepted' || message.type === 'runEnd') {
         const target = this.routes.get(message.requestId); if(target) this.post(target, message);
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
-    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor);
+    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor,traceUri.fsPath);
   }
   private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
   dispose() { this.agent.dispose(); this.panel?.dispose(); }

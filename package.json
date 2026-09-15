@@ -1,8 +1,8 @@
 {
   "name": "vortex-agent",
   "displayName": "Vortex",
-  "description": "Seu agente de código, seus modelos. BYOK para VS Code.",
-  "version": "0.6.0",
+  "description": "Seu agente de c\u00f3digo, seus modelos. BYOK para VS Code.",
+  "version": "0.6.1",
   "publisher": "vortex-local",
   "engines": {
     "vscode": "^1.96.0"
@@ -43,7 +43,7 @@
       },
       {
         "command": "vortex.openSettings",
-        "title": "Vortex: Abrir configurações"
+        "title": "Vortex: Abrir configura\u00e7\u00f5es"
       },
       {
         "command": "vortex.reviewChanges",
@@ -68,6 +68,10 @@
       {
         "command": "vortex.setupSandbox",
         "title": "Vortex: Download sandbox image"
+      },
+      {
+        "command": "vortex.openLastFlow",
+        "title": "Vortex: Open last AI flow (JSON)"
       }
     ],
     "viewsContainers": {
