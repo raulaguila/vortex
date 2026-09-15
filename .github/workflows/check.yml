@@ -27,7 +27,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:tls
-      - run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - if: runner.os == 'Linux'
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+        timeout-minutes: 5
+      - if: runner.os != 'Linux'
+        run: node node_modules/playwright-core/cli.js install chromium
         timeout-minutes: 5
       - if: runner.os != 'Linux'
         run: npm run test:ui && npm run test:host
