@@ -9,7 +9,17 @@ export {contentVersion} from './contentVersion';
 import {Action} from './actions';
 import {safePath} from './policy';
 import {searchPage} from './searchPage';
-const exclude='**/{node_modules,.git,dist,coverage,.env,.env.*,*.vsix}/**';
+const excludes=['node_modules','.git','dist','coverage','.env','.env.*','*.vsix'].map(name=>`**/${name}/**`);
+export function exclusionGlob(patterns:string[]=[]){
+ const expanded=[...excludes,...patterns];
+ for(let i=0;i<expanded.length;i++){
+  const match=expanded[i].match(/\{([^{}]*,[^{}]*)\}/);if(!match)continue;
+  const choices=match[1].split(',').map(value=>expanded[i].slice(0,match.index)+value+expanded[i].slice(match.index!+match[0].length));
+  if(expanded.length+choices.length-1>256)throw new Error('Too many exclusion alternatives. Simplify the patterns.');
+  expanded.splice(i,1,...choices);i--;
+ }
+ return '{'+[...new Set(expanded)].join(',')+'}';
+}
 async function textFile(root:string,relative:string){
  const file=await safePath(root,relative);
  let doc:vscode.TextDocument|undefined;
@@ -19,7 +29,7 @@ async function textFile(root:string,relative:string){
  return {text:await readFile(file,'utf8'),dirty:false,source:'disk'};
 }
 async function candidates(root:string,patterns=['**/*'],exclude_patterns:string[]=[],signal?:AbortSignal){
- const excluded=exclude_patterns.length?'{'+[exclude,...exclude_patterns].join(',')+'}':exclude;
+ const excluded=exclusionGlob(exclude_patterns);
  const cancellation=vscode.CancellationTokenSource?new vscode.CancellationTokenSource():undefined;const abort=()=>cancellation?.cancel();signal?.addEventListener('abort',abort,{once:true});let matches:vscode.Uri[][];
  try{signal?.throwIfAborted();matches=await Promise.all(patterns.map(pattern=>vscode.workspace.findFiles(new vscode.RelativePattern(root,pattern),excluded,10001,cancellation?.token)));signal?.throwIfAborted();}finally{signal?.removeEventListener('abort',abort);cancellation?.dispose();}
  const unique=new Set<string>();

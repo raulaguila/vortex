@@ -16,7 +16,7 @@
 
 Os resultados abaixo usam Node 22 no macOS. Respostas de provedores são simuladas, exceto quando explicitamente indicado.
 
-- 182 testes automatizados passaram: contratos, runtime, cinco adaptadores, credenciais, persistência, paginação e falhas de mutação.
+- 183 testes automatizados passaram: contratos, runtime, cinco adaptadores, credenciais, persistência, paginação e falhas de mutação.
 - Encerramento real de subprocesso antes/depois da renomeação de sessão; a retomada mantém snapshot válido e permite recuperar o bloqueio abandonado.
 - Testes UI passaram em 280/360/480 px para sidebar e 480/800/1200 px para configurações, temas claro/escuro/alto contraste. Screenshots de recuperação foram inspecionados.
 - Extension Host passou com VSIX instalado em perfil descartável: cadastro, seleção, envio, aprovações, rejeições, seis combinações modo/permissão, plano→execução, edição concorrente, Undo, resultados completos e recarga de janela.
@@ -43,7 +43,7 @@ VORTEX_EVAL_KIND=compatible VORTEX_EVAL_TLS_INSECURE=true \
   make test-real > test-results/eval-compatible.log
 ```
 
-Pendentes nesta máquina: Ollama não estava acessível; URL/modelo/chave corporativos não estavam configurados. Não foram usados segredos do perfil do usuário. Docker também exige runtime local ou o job dedicado do CI. Esses testes pendentes impedem afirmar compatibilidade comprovada com os modelos do usuário ou publicar esta versão como plenamente validada.
+Pendentes nesta máquina: Ollama não estava acessível; URL/modelo/chave corporativos não estavam configurados. Não foram usados segredos do perfil do usuário. O isolamento real com Docker passou no job Linux do CI (execução 35035614657); o runtime Docker local permanece indisponível. Os testes pendentes com modelos reais impedem afirmar compatibilidade comprovada com os modelos do usuário ou publicar esta versão como plenamente validada.
 
 ## Reprodução e CI
 

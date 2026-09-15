@@ -62,3 +62,9 @@ test('symbol queries include nested methods and containers',async()=>{
   const result=JSON.parse(await executeReadTool({action:'query_symbols',path:'a.ts'},root,new AbortController().signal));assert.deepEqual(result.items.map(i=>i.name),['A','method']);assert.equal(result.items[1].container,'A');assert.equal(result.items[1].line,2);
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
+
+test('exclusion globs flatten alternatives for VS Code 1.96 ripgrep',()=>{
+ const {exclusionGlob}=require('../dist/readTools');const glob=exclusionGlob(['approval.txt','src/{generated,{cache,tmp}}/**']);
+ assert.equal(glob,'{**/node_modules/**,**/.git/**,**/dist/**,**/coverage/**,**/.env/**,**/.env.*/**,**/*.vsix/**,approval.txt,src/generated/**,src/cache/**,src/tmp/**}');
+ assert.throws(()=>exclusionGlob(['{a,b}'.repeat(10)]),/Too many/);
+});

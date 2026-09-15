@@ -15,8 +15,11 @@ export class ChangeStore {
   this.queue=work.catch(()=>undefined);return work;
  }
  async operation(session:string,state:OperationState){
-  const file=this.file(session)+'.journal';await mkdir(this.directory,{recursive:true});const handle=await open(file,'a',0o600);
-  try{const existing=await readFile(file,'utf8');if(existing&&!existing.endsWith('\n'))await handle.truncate(Buffer.byteLength(existing.slice(0,existing.lastIndexOf('\n')+1)));await handle.writeFile(JSON.stringify({...state,time:Date.now()})+'\n');await handle.sync();}finally{await handle.close();}
+  const file=this.file(session)+'.journal';await mkdir(this.directory,{recursive:true});
+  let existing='';try{existing=await readFile(file,'utf8');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
+  if(existing&&!existing.endsWith('\n'))await durableWrite(file,existing.slice(0,existing.lastIndexOf('\n')+1));
+  const handle=await open(file,'a',0o600);
+  try{await handle.writeFile(JSON.stringify({...state,time:Date.now()})+'\n');await handle.sync();}finally{await handle.close();}
   await syncDirectory(this.directory);
  }
  async operations(session:string):Promise<OperationState[]>{
