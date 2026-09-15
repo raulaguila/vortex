@@ -29,9 +29,10 @@ const root=path.resolve(__dirname,'..');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let app;
   try{
-    app=await _electron.launch({executablePath:await require('./runtime-paths.cjs').vscodePath(),args:['--no-sandbox','--skip-welcome','--skip-release-notes','--disable-updates','--disable-extensions','--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),'--extensionDevelopmentPath='+(process.env.VORTEX_EXTENSION_PATH||root),path.join(temp,'workspace')],timeout:30000});
+    // This suite exercises host-command approval; real Docker isolation has its own required CI job.
+    app=await _electron.launch({env:{...process.env,DOCKER_HOST:'tcp://127.0.0.1:1'},executablePath:await require('./runtime-paths.cjs').vscodePath(),args:['--no-sandbox','--skip-welcome','--skip-release-notes','--disable-updates','--disable-extensions','--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),'--extensionDevelopmentPath='+(process.env.VORTEX_EXTENSION_PATH||root),path.join(temp,'workspace')],timeout:30000});
     const window=await app.firstWindow();await window.waitForLoadState('domcontentloaded');window.setDefaultTimeout(20000);await window.locator('.monaco-workbench').waitFor();
-    await window.keyboard.press('F1');await window.locator('.quick-input-widget input').fill('>Vortex: Abrir agente');await window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Vortex: Abrir agente'}).first().click();
+    await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Vortex: Abrir agente');await window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Vortex: Abrir agente'}).first().click();
     async function findFrame(selector){for(let i=0;i<100;i++){for(const page of app.context().pages())for(const frame of page.frames())if(await frame.locator(selector).count())return frame;await new Promise(resolve=>setTimeout(resolve,100));}await window.screenshot({path:path.join(root,'test-results','host-failure.png')});throw new Error('Webview not found: '+selector);}
     let frame=await findFrame('#prompt');await frame.evaluate(()=>{window.testStates=[];window.addEventListener('message',e=>{if(e.data.type==='state')window.testStates.push(e.data.state);});});
     await frame.locator('#prompt').fill('Rascunho preservado');await frame.locator('#open-settings').click();const settings=await findFrame('#nav-providers');await settings.locator('#add-provider').click();
@@ -124,7 +125,7 @@ const root=path.resolve(__dirname,'..');
     assert.equal(await fs.readFile(approvalFile,'utf8'),'atomic');
     scripted=[{action:'question',text:'Which test behavior do you prefer?',options:['Fast','Full']},{action:'finish',text:'Decision received.'}];
     await frame.locator('#prompt').fill('Ask me which test behavior to use');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-    const answer=window.locator('.quick-input-widget input');await answer.waitFor();await answer.fill('Full');await window.keyboard.press('Enter');await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
+    const answer=window.locator('.quick-input-widget input[type="text"]');await answer.waitFor();await answer.fill('Full');await window.keyboard.press('Enter');await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
     await send('Create nested/new-file.txt with hello',[
       {action:'write',path:'nested/new-file.txt',content:'hello'},
       {action:'finish',text:'Nested file created.'}],'Nested file created.');
@@ -145,7 +146,7 @@ const root=path.resolve(__dirname,'..');
     assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
     // Review and undo operate on the persisted task journal.
     await frame.locator('[data-task-action="reviewChanges"]').click();
-    await window.locator('.quick-input-widget input').waitFor();await window.keyboard.press('Escape');
+    await window.locator('.quick-input-widget input[type="text"]').waitFor();await window.keyboard.press('Escape');
     await frame.locator('[data-task-action="undoChanges"]').click();await dialog.waitFor();await dialog.getByRole('button',{name:'Undo',exact:true}).click();
     for(let i=0;i<50;i++){try{await fs.access(path.join(temp,'workspace','nested','new-file.txt'));await new Promise(r=>setTimeout(r,100));}catch{break;}}
     await assert.rejects(fs.access(path.join(temp,'workspace','nested','new-file.txt')));assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
@@ -154,7 +155,7 @@ const root=path.resolve(__dirname,'..');
     await settings.getByRole('button',{name:'Remove',exact:true}).click();await settings.getByRole('button',{name:'Remove connection',exact:true}).click();await settings.locator('#connections').filter({hasText:'No providers'}).waitFor();await frame.locator('#selected-model').filter({hasText:'Select model'}).waitFor();
     await frame.locator('#close-chat').click();await frame.locator('#recent-sessions .session-title').first().waitFor();assert.equal(await frame.locator('#mode').inputValue(),'ask');await frame.locator('#recent-sessions .session-title').first().click();await frame.locator('.message-body').first().waitFor();
     await frame.locator('#prompt').fill('Draft survives window reload');
-    await window.keyboard.press('F1');await window.locator('.quick-input-widget input').fill('>Developer: Reload Window');
+    await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Developer: Reload Window');
     await Promise.all([window.waitForEvent('domcontentloaded'),window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Developer: Reload Window'}).first().click()]);
     await window.locator('.monaco-workbench').waitFor();frame=await findFrame('#prompt');
     await frame.locator('.message-body').first().waitFor();

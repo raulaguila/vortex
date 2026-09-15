@@ -23,7 +23,7 @@
 
 Os testes simulados não comprovam compatibilidade de um modelo real nem acesso ao provedor corporativo. O teste de ferramentas disponível nas configurações usa um arquivo fictício, sem ler o workspace, e verifica uma chamada real do modelo selecionado.
 
-Docker não está disponível nesta máquina: isolamento e preservação de alterações após timeout dependem do job Linux obrigatório da CI. A matriz CI foi ampliada para macOS, Windows e Linux com Node 22/24, além do VS Code mínimo 1.96.0. Resultados locais não substituem a execução dessa matriz.
+Docker não está disponível nesta máquina. O job Linux com Docker passou na CI: isolamento, bloqueio de rede e preservação de alterações após timeout foram validados em contêiner real. A matriz CI foi ampliada para macOS, Windows e Linux com Node 22/24, além do VS Code mínimo 1.96.0. Resultados locais não substituem a execução dessa matriz.
 
 ## Reprodução
 
