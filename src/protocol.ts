@@ -7,8 +7,8 @@ export interface ConversationPreferences { language: 'pt' | 'en' | 'es' | 'auto'
 import {ExecutionPreferences,ModelTimeouts,validExecution,validTimeouts} from './execution';
 export {ExecutionPreferences,defaultExecution} from './execution';
 export type SettingsSection='providers'|'models'|'conversation'|'execution'|'diagnostics';
-export type ModelSettings=Pick<Preferences,'defaults'|'favorites'|'manualModels'|'context'|'toolProtocols'>;
-export interface Preferences { schemaVersion?:number; execution?:ExecutionPreferences; toolProtocols?: Record<string,'auto'|'native'|'compatibility'>; selected: ModelRef | null; favorites: ModelRef[]; manualModels: ModelRef[]; defaults: Record<ChatMode, ModelRef | null>; conversation: ConversationPreferences; context: Record<string, {source: 'api' | 'custom'; tokens: number}> }
+export type ModelSettings=Pick<Preferences,'defaults'|'favorites'|'manualModels'|'context'|'toolProtocols'|'outputTokens'>;
+export interface Preferences {storage?:{retentionDays:0|30|90|180}; outputTokens?:Record<string,number|null>; schemaVersion?:number; execution?:ExecutionPreferences; toolProtocols?: Record<string,'auto'|'native'|'compatibility'>; selected: ModelRef | null; favorites: ModelRef[]; manualModels: ModelRef[]; defaults: Record<ChatMode, ModelRef | null>; conversation: ConversationPreferences; context: Record<string, {source: 'api' | 'custom'; tokens: number}> }
 export const defaultConversation = (): ConversationPreferences => ({language: 'auto', uiLanguage: 'en', fontSize: null, sendKey: 'enter'});
 export interface ProviderInput { id?: string; name: string; kind: Kind; baseUrl: string; key: string; clearKey: boolean; tlsInsecure?: boolean; timeouts?:ModelTimeouts|null }
 export interface Catalog { status: 'idle' | 'loading' | 'ready' | 'error'; models: string[]; error?: string; requestId?: string }
@@ -16,8 +16,8 @@ export interface Connection extends Provider { hasKey: boolean; catalog: Catalog
 export interface ModelLimits { tools?: boolean; input: number | null; output: number | null; status: 'ready' | 'unknown'; error?: string }
 export interface ChecklistItem { id: string; text: string; status: 'pending' | 'running' | 'done' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
-export interface SettingsState {effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
-export interface ActivityData {runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied';output:string;startedAt:number;endedAt:number}
+export interface SettingsState {diagnosticVersions?:Record<string,string>;effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
+export interface ActivityData {runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}
 export type RunPhase='preparing'|'context'|'waiting_model'|'receiving'|'compacting'|'approval'|'tool'|'summarizing'|'finishing'|'recovering';
 export interface RunProgress {runId:string;phase:RunPhase;startedAt:number;phaseStartedAt:number;tool?:{id:string;name:string;path?:string}}
 export interface AgentEvent { failureCode?:string; activity?:ActivityData; incomplete?:boolean; role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
@@ -38,7 +38,9 @@ export type Request = (
   | { type: 'modelInfo'; model: ModelRef }
   | {type:'setExecution';execution:ExecutionPreferences}
   | {type:'saveModels';settings:ModelSettings}
-  | {type:'testChat';model:ModelRef}
+  | {type:'testChat'|'testTools';model:ModelRef}
+  | {type:'storageInfo'|'cleanupStorage'}
+  | {type:'setStorage';retentionDays:0|30|90|180}
   | {type:'cancelTestChat'|'traceInfo'|'openTrace'|'exportTrace'|'clearTrace'|'retry'}
   | {type:'attachContext'|'setupSandbox'}
   | {type:'removeContext';id:string}
@@ -52,9 +54,13 @@ export type Request = (
   | { type: 'stop' }
 ) & { requestId: string };
 export type Response =
+  | {type:'activityUpdate';activity:ActivityData}
+  | {type:'storageInfo';bytes:number;sessions:number;retentionDays:0|30|90|180}
+  | {type:'commandOutput';runId:string;id:string;stream:'stdout'|'stderr';text:string}
   | {type:'runProgress';progress:RunProgress}
   | {type:'runFailure';code:string;message:string;retryable:boolean}
   | {type:'traceInfo';path:string;bytes:number;exists:boolean}
+  | {type:'toolsTestResult';requestId:string;model:ModelRef;result:import('./modelProbe').ProbeResult}
   | {type:'chatTestResult';requestId:string;ok:boolean;elapsed:number;message:string;protocol:string}
   | {type:'usage';model:ModelRef;input:number;output:number}
   | {type:'attachments';items:{id:string;label:string;path?:string}[]}
@@ -68,7 +74,7 @@ export type Response =
   | { type: 'checklist'; items: ChecklistItem[] }
   | { type: 'context'; model?: ModelRef; used: number; budget: number; removed: number; source: string }
   | { type: 'sessions'; sessions: SessionSummary[]; requestId: string;offset?:number;hasMore?:boolean }
-  | { type: 'sessionLoaded'; mode: Mode; permission: Permission; model: ModelRef }
+  | { type: 'sessionLoaded'; readOnly?:boolean;mode: Mode; permission: Permission; model: ModelRef }
 
   | { type: 'settingsSection'; section: SettingsSection }
   | { type: 'accepted'; requestId: string }
@@ -108,7 +114,9 @@ export function parseRequest(v: unknown): Request {
     case 'resume':case 'implementPlan':case 'reviewChanges':case 'undoChanges':valid=true;break;
     case 'setExecution': valid=validExecution(v.execution);break;
     case 'saveModels': valid=isModelSettings(v.settings);break;
-    case 'testChat': valid=isModelRef(v.model);break;
+    case 'storageInfo':case 'cleanupStorage':valid=true;break;
+    case 'setStorage':valid=[0,30,90,180].includes(Number(v.retentionDays))&&typeof v.retentionDays==='number';break;
+    case 'testChat':case 'testTools': valid=isModelRef(v.model);break;
     case 'cancelTestChat':case 'traceInfo':case 'openTrace':case 'exportTrace':case 'clearTrace':case 'retry':valid=true;break;
     case 'setToolProtocol': valid=isModelRef(v.model)&&['auto','native','compatibility'].includes(String(v.protocol));break;
     case 'modelInfo': valid = isModelRef(v.model); break;
@@ -132,5 +140,5 @@ export function isConversationPatch(v: unknown): v is Partial<ConversationPrefer
 
 export function isModelSettings(v:any):v is ModelSettings {
  const refKey=(key:string)=>{try{const a=JSON.parse(key);return Array.isArray(a)&&a.length===2&&a.every(x=>typeof x==='string'&&x.length>0&&x.length<=500);}catch{return false;}};
- return record(v)&&record(v.defaults)&&['ask','plan','agent'].every(k=>(v.defaults as any)[k]===null||isModelRef((v.defaults as any)[k]))&&Array.isArray(v.favorites)&&v.favorites.every(isModelRef)&&Array.isArray(v.manualModels)&&v.manualModels.every(isModelRef)&&record(v.context)&&Object.entries(v.context).every(([k,c]:any)=>refKey(k)&&record(c)&&['api','custom'].includes(String(c.source))&&Number.isSafeInteger(c.tokens)&&Number(c.tokens)>=1024&&Number(c.tokens)<=10000000)&&(v.toolProtocols===undefined||record(v.toolProtocols)&&Object.entries(v.toolProtocols).every(([k,p])=>refKey(k)&&['auto','native','compatibility'].includes(p as string)));
+ return record(v)&&(v.outputTokens===undefined||record(v.outputTokens)&&Object.entries(v.outputTokens).every(([k,n])=>refKey(k)&&(n===null||Number.isSafeInteger(n)&&Number(n)>0&&Number(n)<10000000)))&&record(v.defaults)&&['ask','plan','agent'].every(k=>(v.defaults as any)[k]===null||isModelRef((v.defaults as any)[k]))&&Array.isArray(v.favorites)&&v.favorites.every(isModelRef)&&Array.isArray(v.manualModels)&&v.manualModels.every(isModelRef)&&record(v.context)&&Object.entries(v.context).every(([k,c]:any)=>refKey(k)&&record(c)&&['api','custom'].includes(String(c.source))&&Number.isSafeInteger(c.tokens)&&Number(c.tokens)>=1024&&Number(c.tokens)<=10000000)&&(v.toolProtocols===undefined||record(v.toolProtocols)&&Object.entries(v.toolProtocols).every(([k,p])=>refKey(k)&&['auto','native','compatibility'].includes(p as string)));
 }

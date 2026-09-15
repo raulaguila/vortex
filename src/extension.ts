@@ -1,3 +1,4 @@
+import {probeModel} from './modelProbe';
 import * as vscode from 'vscode';
 import {randomBytes} from 'node:crypto';
 import {RunTrace} from './trace';
@@ -37,7 +38,7 @@ class VortexController implements vscode.WebviewViewProvider {
   private chatTest?:AbortController;
   private settingsSection: SettingsSection = 'providers';
   constructor(private ctx: vscode.ExtensionContext) {
-    this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,ctx.globalStorageUri.fsPath,vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json').fsPath);
     const traceUri=vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json');
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.openLastFlow',async()=>{try{await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(traceUri));}catch{void vscode.window.showInformationMessage('No saved flow yet. Send a message to Vortex first.');}}));
     const output=vscode.window.createOutputChannel('Vortex');ctx.subscriptions.push(output);
@@ -89,7 +90,7 @@ class VortexController implements vscode.WebviewViewProvider {
     const panel = vscode.window.createWebviewPanel('vortex.settings', 'Vortex — Configurações', vscode.ViewColumn.Active, {enableScripts:true, retainContextWhenHidden:true});
     this.panel = panel;
     this.panelSurface = this.bind(panel.webview, 'settings', listener => panel.onDidDispose(listener));
-    panel.onDidDispose(() => { if(this.panel === panel) {this.panel=undefined; this.panelSurface=undefined;} });
+    panel.onDidDispose(() => { if(this.panel === panel) {this.chatTest?.abort();this.panel=undefined; this.panelSurface=undefined;} });
   }
   private bind(webview: vscode.Webview, kind: Surface['kind'], onDispose: (listener: () => void) => vscode.Disposable): Surface {
     const target: Surface = {webview, kind, disposed:false}; this.surfaces.add(target);
@@ -117,7 +118,7 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'removeContext':this.attachments.remove(msg.id);this.attachmentState();success();return;
       case 'ready':
         this.attachmentState();
-        await this.providers.migrateSelection(msg.legacySelection);await this.providers.initialize(); await this.state();
+        await this.providers.migrateSelection(msg.legacySelection);await this.providers.initialize();await this.sessions.recoverDeletions();await this.sessions.cleanup(this.providers.preferences().storage?.retentionDays||0); await this.state();
         if(!this.restored)this.restored=(async()=>{
           const id=this.ctx.workspaceState.get<string>('activeSession');
           if(id&&!this.agent.busy)try{await this.agent.load(id);}catch{await this.ctx.workspaceState.update('activeSession',undefined);}
@@ -132,7 +133,7 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'openLink': await vscode.env.openExternal(vscode.Uri.parse(msg.url));return;
       case 'listSessions': {const rows=await this.sessions.list(msg.query,msg.offset||0,51);this.post(target,{type:'sessions',sessions:rows.slice(0,50),requestId:msg.requestId,offset:msg.offset||0,hasMore:rows.length>50});return;}
       case 'loadSession': await this.agent.load(msg.id); return;
-      case 'deleteSession': await this.agent.removeSession(msg.id);success();return;
+      case 'deleteSession': if(await vscode.window.showWarningMessage('Delete this session and its saved results?',{modal:true,detail:'This removes the conversation, retained outputs and undo history. Workspace files are preserved.'},'Delete')==='Delete')await this.agent.removeSession(msg.id);success();return;
       case 'refreshAllModels': await Promise.all(this.providers.providers().map(p=>this.providers.refresh(p.id,msg.requestId+':'+p.id,()=>this.state())));success();return;
       case 'modelInfo': await this.providers.inspect(msg.model);await this.state();success();return;
       case 'resume':case 'implementPlan':
@@ -149,6 +150,15 @@ class VortexController implements vscode.WebviewViewProvider {
       }
       case 'clearTrace':if(this.agent.busy)throw new Error('Stop the task before clearing its flow.');await RunTrace.settled(this.traceUri().fsPath);await unlink(this.traceUri().fsPath).catch((e)=>{if(e.code!=='ENOENT')throw e;});await this.traceInfo(target);success();return;
       case 'cancelTestChat':this.chatTest?.abort();success();return;
+      case 'storageInfo':this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:this.providers.preferences().storage?.retentionDays||0});return;
+      case 'setStorage':await this.providers.setStorage(msg.retentionDays);await this.sessions.cleanup(msg.retentionDays);await this.state();this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:msg.retentionDays});success();return;
+      case 'cleanupStorage':if(this.agent.busy)throw new Error('Wait for the task to finish.');const retention=this.providers.preferences().storage?.retentionDays||0;if(!retention&&await vscode.window.showWarningMessage('Delete all completed sessions and their saved results?',{modal:true,detail:'This removes undo history. Workspace files are preserved.'},'Delete completed sessions')!=='Delete completed sessions'){success();return;}await this.sessions.cleanup(retention,true);this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:this.providers.preferences().storage?.retentionDays||0});success();return;
+      case 'testTools':{
+        if(this.agent.busy||this.chatTest)throw new Error('Wait for the current operation to finish.');
+        const controller=new AbortController();this.chatTest=controller;const revision=this.providers.revision(msg.model);
+        try{const result=await probeModel(this.providers,msg.model,controller.signal);if(revision!==this.providers.revision(msg.model))throw new Error('Connection changed. Test again.');this.post(target,{type:'toolsTestResult',requestId:msg.requestId,model:msg.model,result});}
+        finally{this.chatTest=undefined;}return;
+      }
       case 'testChat':{
         if(this.agent.busy||this.chatTest)throw new Error('Wait for the current operation to finish.');const controller=new AbortController();this.chatTest=controller;const started=Date.now();
         try{const client=await this.providers.client(msg.model.providerId);const answer=await client.chat(msg.model.modelId,'Connection test. Reply only OK.',[{role:'user',content:'Reply OK.'}],controller.signal,{tokens:4096,output:64});this.post(target,{type:'chatTestResult',requestId:msg.requestId,ok:true,elapsed:Date.now()-started,message:answer.slice(0,500),protocol:'Chat (no tools)'});}

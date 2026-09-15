@@ -150,7 +150,7 @@ test('read versions reject later external modifications or deletion',()=>{
 test('task controls reflect saved outcomes and actual change availability',async()=>{
  const h=harness([]);h.agent.session={id:'session',mode:'ask',runState:'complete'};await h.agent.taskState();let state=h.events.at(-1);assert.equal(state.resume,false);assert.equal(state.reviewChanges,false);assert.equal(state.implementPlan,false);
  h.agent.session.runState='paused';await h.agent.taskState();assert.equal(h.events.at(-1).resume,true);
- h.agent.session.pendingTool={name:'command'};await h.agent.taskState();assert.equal(h.events.at(-1).resume,false);
+ h.agent.session.pendingTool={name:'command'};await h.agent.taskState();assert.equal(h.events.at(-1).resume,true);
  h.agent.session.mode='plan';h.agent.checklist=[{id:'a',text:'Do work',status:'pending'}];h.agent.reviews={availability:async()=>({reviewChanges:true,undoChanges:true})};await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,true);assert.equal(h.events.at(-1).undoChanges,true);
  h.agent.run=new AbortController();await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,false);assert.equal(h.events.at(-1).undoChanges,false);
 });
@@ -213,7 +213,7 @@ test('compatibility validation returns the rejected reply and specific argument 
  h.agent.providers.client=async()=>({chat:async(_model,_system,messages)=>{requests.push(structuredClone(messages));return ++count===1?'{"action":"read","startLine":1}':count===2?'{"action":"read","path":"README.md"}':'README summary.';}});
  await h.run('Describe README','ask');
  const recovery=requests[1];assert.equal(recovery.at(-2).role,'assistant');assert.equal(recovery.at(-2).content,'{"action":"read","startLine":1}');assert.match(recovery.at(-1).content,/arguments.path is required/);assert.match(recovery.at(-1).content,/not a new user request or authorization/);
- assert.equal(h.tools.length,1);assert.equal(h.tools[0].path,'README.md');assert.equal(h.events.at(-1).status,'complete');assert.equal(h.events.find(e=>e.event?.activity?.name==='modelValidation').event.activity.status,'error');
+ assert.equal(h.tools.length,1);assert.equal(h.tools[0].path,'README.md');assert.equal(h.events.at(-1).status,'complete');assert.equal(h.events.find(e=>e.event?.activity?.name==='modelValidation').event.activity.status,'recovered');
 });
 test('rejected native batch retains every call ID and reports no execution before correction',async()=>{
  const h=harness([]);const requests=[];let count=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
@@ -243,3 +243,6 @@ test('quoted false editor flag executes once as false and keeps the original nat
   await h.run('Which files are open?','ask');assert.deepEqual(h.tools,[{action:'editor',selection:false}]);assert.equal(h.events.at(-1).status,'complete');assert.equal(h.events.filter(e=>e.event?.activity?.name==='modelValidation').length,0);if(native)assert.equal(h.agent.messages.find(m=>m.toolCalls?.length).toolCalls[0].arguments.selection,'false');
  }
 });
+
+test('uncertain outcomes require explicit review confirmation before another run',async()=>{const h=harness([{action:'finish',text:'Reviewed.'}]);h.agent.session={id:'fixture',mode:'ask',permission:'supervised',model:{providerId:'p',modelId:'m'},pendingTool:{name:'command'}};h.agent.host.confirmUncertain=async()=>false;await assert.rejects(h.run('Continue after review','ask'),/Review the workspace/);assert.equal(h.calls.length,0);assert.equal(h.agent.session.pendingTool.name,'command');h.agent.host.confirmUncertain=async()=>true;await h.run('Continue after review','ask');assert.equal(h.calls.length,1);assert.equal(h.agent.session.pendingTool,undefined);});
+test('response budget is frozen for a running task',async()=>{const h=harness([{action:'read',path:'a'},{action:'finish',text:'Done'}]);h.agent.providers.contextBudget=()=>({tokens:16384,output:h.calls.length?1000:4096,source:'custom'});await h.run('Read a','ask');assert.equal(h.calls[0][4].output,4096);assert.equal(h.calls[1][4].output,4096);});

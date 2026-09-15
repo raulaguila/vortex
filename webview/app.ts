@@ -1,8 +1,12 @@
+import {onHostMessage} from './messages';
+import type {SettingsState} from '../src/protocol';
+export {};
 const vscode=acquireVsCodeApi();
-const $=id=>document.getElementById(id);
+const $=(id:string):any=>document.getElementById(id);
 const saved=vscode.getState()||{};
 const names={openai:'OpenAI',anthropic:'Anthropic',gemini:'Gemini',ollama:'Ollama',compatible:'OpenAI-compatible'};
-let state={providers:[],preferences:{selected:null,favorites:[],manualModels:[],defaults:{ask:null,plan:null,agent:null},conversation:{language:'auto',uiLanguage:'en',fontSize:null,sendKey:'enter'}}};
+let state:SettingsState={limits:{},providers:[],preferences:{context:{},selected:null,favorites:[],manualModels:[],defaults:{ask:null,plan:null,agent:null},conversation:{language:'auto',uiLanguage:'en',fontSize:null,sendKey:'enter'}}};
+let sessionReadOnly=false;
 let busy=false,starting=false,modeChanging=false,clearing=false,sequence=0;
 const modelPicker=new window.ComposerPicker($('model-picker'),document.querySelector('.composer'));
 const choicePicker=new window.ComposerPicker($('choice-menu'),document.querySelector('.composer'));
@@ -11,7 +15,7 @@ let sessionRows=[],sessionQueryId='',searchTimer;
 const pending=new Map(),session='chat:'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const same=(a,b)=>!!a&&!!b&&a.providerId===b.providerId&&a.modelId===b.modelId;
 const modelKey=m=>JSON.stringify([m.providerId,m.modelId]);
-const create=(tag,className,text)=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
+const create=(tag:string,className?:string,text?:any):any=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
 const runProgress=create('div','run-progress');runProgress.id='run-progress';runProgress.hidden=true;
 const progressSpinner=create('span','progress-spinner');progressSpinner.setAttribute('aria-hidden','true');
 const progressLabel=create('span','progress-label');progressLabel.setAttribute('role','status');progressLabel.setAttribute('aria-live','polite');
@@ -31,7 +35,7 @@ function persist(){vscode.setState({draft:$('prompt').value,mode:$('mode').value
 function notice(id,text='',error=false){$(id).textContent=text;$(id).classList.toggle('error',error);}
 function autosize(){$('prompt').style.height='auto';$('prompt').style.height=Math.min($('prompt').scrollHeight,220,window.innerHeight*.35)+'px';}
 function updatePermissions(){$('permission').hidden=true;$('permission-trigger').hidden=false;$('read-only').hidden=true;updateChoiceLabels();persist();}
-function updateBusy(value,text){busy=value;showProgress(value||starting,text);if(text)$('run-status').textContent=value?progressLabel.textContent:text;$('send').hidden=value;$('stop').hidden=!value;$('stop').disabled=false;for(const id of ['mode','mode-trigger','permission','permission-trigger','model-trigger','new-task','close-chat'])$(id).disabled=value||starting||modeChanging||clearing;$('send').disabled=value||starting||modeChanging||clearing||!$('prompt').value.trim();}
+function updateBusy(value,text?:string){busy=value;showProgress(value||starting,text);if(text)$('run-status').textContent=value?progressLabel.textContent:text;$('send').hidden=value;$('stop').hidden=!value;$('stop').disabled=false;for(const id of ['mode','mode-trigger','permission','permission-trigger','model-trigger','new-task','close-chat'])$(id).disabled=value||starting||modeChanging||clearing;$('send').disabled=value||starting||modeChanging||clearing||!$('prompt').value.trim();$('prompt').readOnly=sessionReadOnly;if(sessionReadOnly)for(const id of ['send','mode-trigger','permission-trigger','model-trigger'])$(id).disabled=true;}
 function messageAction(icon,label,handler){
  const button=create('button','icon-button message-action');button.title=window.VortexUI.t(label);button.setAttribute('aria-label',window.VortexUI.t(label));
  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('aria-hidden','true');const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href','#i-'+icon);svg.append(use);button.append(svg);button.onclick=handler;return button;
@@ -64,12 +68,13 @@ function activityRow(event){
  const pt=window.VortexUI.language()==='pt',details=create('details','activity');
  const [raw,...legacyLines]=event.text.split('\n'),parts=raw.split(' · '),tool=event.activity?.name||parts[0],status=event.activity?.status||(['success','error','denied'].includes(parts.at(-1))?parts.pop():null),lines=event.activity?event.activity.output.split('\n'):legacyLines;
  const labels={modelValidation:['Model response rejected','Resposta do modelo rejeitada','ask'],multiEdit:['Edited file','Alterou arquivo','edit'],editor:['Read editor context','Leu contexto do editor','eye'],question:['Asked for clarification','Solicitou esclarecimento','ask'],readOutput:['Read more output','Leu mais resultados','eye'],symbols:['Inspected symbols','Consultou símbolos','search'],skill:['Read project skill','Leu instruções do projeto','eye'],list:['Listed project files','Listou arquivos do projeto','plan'],read:['Read file','Leu arquivo','eye'],search:['Searched the project','Pesquisou no projeto','search'],diagnostics:['Checked diagnostics','Verificou diagnósticos','search'],plan:['Updated the plan','Atualizou o plano','plan'],write:['Wrote file','Gravou arquivo','edit'],edit:['Edited file','Alterou arquivo','edit'],remove:['Removed file','Removeu arquivo','trash'],command:['Ran command','Executou comando','agent']};
+ details.dataset.activityId=event.activity?.id||'';
  const known=labels[tool],summary=create('summary'),copy=create('span','activity-description');summary.append(choiceIcon(known?.[2]||'plan'));
- const label=tool==='modelValidation'?known[pt?1:0]:status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
+ const label=status==='uncertain'?(pt?'Resultado precisa de revisão':'Outcome needs review'):status==='cancelled'?(pt?'Ação interrompida':'Action interrupted'):status==='recovered'?(pt?'Solicitação ajustada; execução continuou':'Request corrected; execution continued'):tool==='modelValidation'?known[pt?1:0]:status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
  copy.append(create('span','activity-label',label));
  const detail=known&&tool!=='modelValidation'?(event.activity?.path||parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
  if(detail)copy.append(create('span','activity-path',detail));summary.append(copy);
- if(status==='error'||status==='denied'){details.dataset.status=status;summary.append(create('span','activity-result',status==='error'?'!':'−'));}
+ if(status==='error'||status==='denied'||status==='uncertain'){details.dataset.status=status;summary.append(create('span','activity-result',status==='error'?'!':'−'));}
  if(Number.isFinite(event.durationMs)&&event.durationMs>=0){const seconds=event.durationMs/1000;summary.append(create('span','activity-duration',(seconds<1?'<1':Math.round(seconds))+'s'));}
  details.append(summary);
  const output=create('div','activity-output');
@@ -78,7 +83,7 @@ function activityRow(event){
  }else output.append(create('pre','',lines.join('\n')));
  details.append(output);return details;
 }
-function welcome(){delete $('chat-heading').dataset.title;$('chat-heading').title='';contextUsage=null;renderContext();$('close-chat').hidden=true;$('chat-heading').querySelector('span').textContent=window.VortexUI.t('Chats');$('timeline').replaceChildren();const el=create('div','welcome');el.id='welcome';const img=create('img','empty-symbol');img.src=document.querySelector('.brand img').src;img.alt='Vortex';el.append(img);$('timeline').append(el);renderRecent();}
+function welcome(){delete $('chat-heading').dataset.title;$('chat-heading').title='';contextUsage=null;renderContext();$('close-chat').hidden=true;$('chat-heading').querySelector('span').textContent=window.VortexUI.t('Chats');$('timeline').replaceChildren();const el=create('div','welcome');el.id='welcome';const img=create('img','empty-symbol');img.src=document.querySelector<HTMLImageElement>('.brand img').src;img.alt='Vortex';el.append(img);$('timeline').append(el);renderRecent();}
 function renderSelection() {
   const ref = state.preferences.selected;
   const provider = state.providers.find(p => p.id === ref?.providerId);
@@ -99,7 +104,7 @@ function catalogText(p) {
   return 'Catálogo ainda não consultado.';
 }
 function preserveFocus(container, render) {
-  const focus = container.contains(document.activeElement) ? document.activeElement.dataset.focus : undefined;
+  const focus = container.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focus : undefined;
   const scroll = container.scrollTop; render(); container.scrollTop = scroll;
   if(focus) container.querySelector(`[data-focus="${CSS.escape(focus)}"]`)?.focus({preventScroll:true});
 }
@@ -147,7 +152,7 @@ $('new-task').onclick=returnHome;$('close-chat').onclick=returnHome;
 $('prompt').oninput=()=>{persist();autosize();updateBusy(busy);};
 $('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&(state.preferences.conversation.sendKey==='enter'||e.ctrlKey||e.metaKey)){e.preventDefault();submit();}};
 window.addEventListener('resize',autosize);
-window.addEventListener('message',({data:m})=>{
+onHostMessage(m=>{
  if(m.type==='state'){renderState(m.state);updateBusy(m.busy);return;}
  if(m.type==='history'){for(const [id,context]of pending)if(context.type==='clear')pending.delete(id);delete $('chat-heading').dataset.title;loadSessions('');if(m.events.length){$('timeline').replaceChildren();m.events.forEach(addEvent);}else welcome();if(clearing){clearing=false;$('prompt').value='';persist();autosize();notice('chat-notice');}updateBusy(m.busy,m.status);return;}
  if(m.type==='sessions'){if(m.requestId!==sessionQueryId)return;sessionRows=m.offset?[...sessionRows,...m.sessions]:m.sessions;renderRecent();renderSessionResults();if(m.hasMore){const more=create('button','',window.VortexUI.language()==='pt'?'Carregar mais':'Load more');more.onclick=()=>{sessionQueryId=request('listSessions',{query:$('session-search').value,offset:sessionRows.length});};$('sessions-results').append(more);}return;}
@@ -190,7 +195,7 @@ $('mode-trigger').onclick=()=>showChoices('mode');$('permission-trigger').onclic
 $('permission').addEventListener('change',updateChoiceLabels);
 $('refresh-models').onclick=()=>{$('refresh-models').disabled=true;request('refreshAllModels');};
 $('context-status').onclick=()=>request('openSettings',{section:'models'});
-function renderChecklist(items){const implement=document.querySelector('[data-task-action=implementPlan]');if(implement)implement.hidden=!items.length;$('checklist').hidden=!items.length;$('checklist-items').replaceChildren();for(const item of items){const li=create('li',item.status);li.append(create('span','',item.status==='done'?'✓':item.status==='running'?'●':'○'),create('span','',item.text));$('checklist-items').append(li);}$('checklist-progress').textContent=items.filter(i=>i.status==='done').length+'/'+items.length;}
+function renderChecklist(items){const implement=document.querySelector<HTMLElement>('[data-task-action=implementPlan]');if(implement)implement.hidden=!items.length;$('checklist').hidden=!items.length;$('checklist-items').replaceChildren();for(const item of items){const li=create('li',item.status);li.append(create('span','',item.status==='done'?'✓':item.status==='running'?'●':'○'),create('span','',item.text));$('checklist-items').append(li);}$('checklist-progress').textContent=items.filter(i=>i.status==='done').length+'/'+items.length;}
 
 function loadSessions(query){sessionQueryId=request('listSessions',{query});}
 function sessionRow(session,canDelete=false){const row=create('div','session-row');const b=create('button','session-title');b.append(create('span','session-name',session.title),sessionTime(session.updatedAt));b.onclick=()=>{request('loadSession',{id:session.id});if($('sessions-dialog').open)$('sessions-dialog').close();};row.append(b);if(canDelete){const remove=create('button','icon-button');remove.append(choiceIcon('trash'));remove.title=window.VortexUI.language()==='pt'?'Excluir sessão':'Delete session';remove.setAttribute('aria-label',remove.title+': '+session.title);remove.onclick=()=>{if(remove.dataset.confirm==='yes'){remove.disabled=true;request('deleteSession',{id:session.id});}else{remove.classList.remove('icon-button');remove.dataset.confirm='yes';remove.textContent=window.VortexUI.language()==='pt'?'Excluir?':'Delete?';remove.setAttribute('aria-label',(window.VortexUI.language()==='pt'?'Confirmar exclusão: ':'Confirm deletion: ')+session.title);}};row.append(remove);}return row;}
@@ -198,7 +203,7 @@ function renderRecent(){const welcome=$('welcome');if(!welcome)return;let recent
 function renderSessionResults(){$('sessions-results').replaceChildren();for(const s of sessionRows)$('sessions-results').append(sessionRow(s,true));}
 function openSessions(){loadSessions('');$('session-search').value='';if(!$('sessions-dialog').open)$('sessions-dialog').showModal();$('session-search').focus();}
 $('history-button').onclick=openSessions;$('close-sessions').onclick=()=>$('sessions-dialog').close();$('session-search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>loadSessions($('session-search').value),150);};
-window.addEventListener('message',({data:m})=>{if(m.type==='state')updateChoiceLabels();});
+onHostMessage(m=>{if(m.type==='state')updateChoiceLabels();});
 
 function renderContext(){
  const ref=state.preferences.selected;
@@ -217,7 +222,7 @@ function sessionTime(timestamp){
 }
 
 const liveStreams=new Map();
-window.addEventListener('message',({data:m})=>{
+onHostMessage(m=>{
  if(m.type==='stream'){
   if(m.done){const row=liveStreams.get(m.id);if(row&&m.incomplete){row.element.classList.add('incomplete');row.element.append(create('p','partial-label',window.VortexUI.t('Incomplete response')));}else row?.element.remove();liveStreams.delete(m.id);return;}
   let row=liveStreams.get(m.id);if(!row){const element=create('article','assistant streaming');$('timeline').append(element);row={element,text:''};liveStreams.set(m.id,row);}
@@ -232,26 +237,38 @@ for(const [type,en,pt] of [['resume','Continue','Continuar'],['implementPlan','I
 }
 $('timeline').after(taskActions);
 let availableTaskActions={};
-window.addEventListener('message',({data:m})=>{if(m.type==='taskState')availableTaskActions=m;if(['taskState','history','event','status','state'].includes(m.type)){let visible=false;taskActions.querySelectorAll('button').forEach(b=>{b.hidden=busy||!availableTaskActions[b.dataset.taskAction];if(!b.hidden)visible=true;b.disabled=busy;b.textContent=b.dataset[window.VortexUI.language()==='pt'?'pt':'en'];});taskActions.hidden=!visible;}});
+onHostMessage(m=>{if(m.type==='taskState')availableTaskActions=m;if(['taskState','history','event','status','state'].includes(m.type)){let visible=false;taskActions.querySelectorAll('button').forEach(b=>{b.hidden=busy||sessionReadOnly||!availableTaskActions[b.dataset.taskAction];if(!b.hidden)visible=true;b.disabled=busy;b.textContent=b.dataset[window.VortexUI.language()==='pt'?'pt':'en'];});taskActions.hidden=!visible;}});
 taskActions.hidden=true;
 
 const attachedContext=create('div','attached-context');document.querySelector('.composer').prepend(attachedContext);
 const attachButton=create('button','', '@');attachButton.title='Add context';attachButton.setAttribute('aria-label','Add context');attachButton.onclick=()=>request('attachContext');document.querySelector('.composer-meta').prepend(attachButton);
 $('prompt').addEventListener('input',()=>{if($('prompt').value.endsWith('@'))request('attachContext');});
-window.addEventListener('message',({data:m})=>{if(m.type==='attachments'){attachedContext.replaceChildren();for(const item of m.items){const button=create('button','context-chip',item.label+' ×');button.title='Remove context: '+item.label;button.onclick=()=>request('removeContext',{id:item.id});attachedContext.append(button);}}});
+onHostMessage(m=>{if(m.type==='attachments'){attachedContext.replaceChildren();for(const item of m.items){const button=create('button','context-chip',item.label+' ×');button.title='Remove context: '+item.label;button.onclick=()=>request('removeContext',{id:item.id});attachedContext.append(button);}}});
 
 const progressTime=create('span','progress-time');progressTime.setAttribute('aria-hidden','true');runProgress.append(progressTime);
 setInterval(()=>{if(runTiming&&!runProgress.hidden)progressTime.textContent=Math.max(0,Math.floor((Date.now()-runTiming.phaseStartedAt)/1000))+' s';},1000);
 const jump=create('button','jump-latest','Go to latest');jump.hidden=true;$('timeline').after(jump);
 const updateJump=()=>{jump.hidden=$('timeline').scrollHeight-$('timeline').scrollTop-$('timeline').clientHeight<100;};$('timeline').addEventListener('scroll',updateJump);jump.onclick=()=>{$('timeline').scrollTop=$('timeline').scrollHeight;updateJump();};new MutationObserver(updateJump).observe($('timeline'),{childList:true,subtree:true});
 const recovery=create('div','recovery-actions');recovery.hidden=true;runProgress.after(recovery);
-window.addEventListener('message',({data:m})=>{
+onHostMessage(m=>{
  if(m.type==='history'&&!m.busy){recovery.hidden=true;runTiming=undefined;}
  if(m.type==='runProgress'){runTiming=m.progress;progressTime.textContent='0 s';showProgress(true,m.progress.phase);}
  if(m.type==='accepted'){runTiming=undefined;recovery.replaceChildren();recovery.hidden=true;}
  if(m.type==='runFailure'){
   recovery.replaceChildren();recovery.hidden=false;
-  const add=(label,type,data)=>{const b=create('button','',window.VortexUI.t(label));b.onclick=()=>{request(type,data||{});if(type==='retry')recovery.hidden=true;};recovery.append(b);};
+  const add=(label,type,data?:Record<string,unknown>)=>{const b=create('button','',window.VortexUI.t(label));b.onclick=()=>{request(type,data||{});if(type==='retry')recovery.hidden=true;};recovery.append(b);};
   if(m.retryable)add('Try again','retry');if(m.code==='tool_validation')add('Open settings','openSettings',{section:'models'});if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
  }
 });
+
+let liveCommand;
+onHostMessage(m=>{
+ if(m.type==='activityUpdate'){const row=document.querySelector<HTMLDetailsElement>('[data-activity-id="'+CSS.escape(m.activity.id)+'"]');if(row){const next=activityRow({role:'activity',text:'',activity:m.activity});next.open=row.open;row.replaceWith(next);}}
+ if(m.type==='commandOutput'&&(busy||starting)&&runTiming?.runId===m.runId){
+  if(!liveCommand||liveCommand.dataset.id!==m.id){liveCommand?.remove();liveCommand=create('details','live-command');liveCommand.dataset.id=m.id;liveCommand.append(create('summary','',window.VortexUI.language()==='pt'?'Saída do comando':'Command output'),create('pre'));runProgress.after(liveCommand);}
+  const pre=liveCommand.querySelector('pre');pre.textContent=(pre.textContent+m.text).slice(-32768);if(liveCommand.open)pre.scrollTop=pre.scrollHeight;
+ }
+ if(m.type==='runEnd'||m.type==='accepted'||m.type==='history'||m.type==='toolProgress'&&['success','error','denied','cancelled','uncertain'].includes(m.status)){liveCommand?.remove();liveCommand=undefined;}
+});
+
+onHostMessage(m=>{if(m.type==='sessionLoaded')sessionReadOnly=!!m.readOnly;else if(m.type==='accepted'||m.type==='history'&&!m.events.length)sessionReadOnly=false;else return;updateBusy(busy);$('prompt').readOnly=sessionReadOnly;if(sessionReadOnly)for(const id of ['send','mode-trigger','permission-trigger','model-trigger'])$(id).disabled=true;});

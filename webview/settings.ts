@@ -1,19 +1,22 @@
+import {onHostMessage} from './messages';
+import type {SettingsState} from '../src/protocol';
+export {};
 const vscode = acquireVsCodeApi();
-const $ = id => document.getElementById(id);
+const $ = (id:string):any => document.getElementById(id);
 const names = {openai:'OpenAI',anthropic:'Anthropic',gemini:'Gemini',ollama:'Ollama',compatible:'OpenAI-compatible'};
 const defaults = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',gemini:'https://generativelanguage.googleapis.com/v1beta',ollama:'http://localhost:11434',compatible:''};
-let state = {providers:[],preferences:{selected:null,favorites:[],manualModels:[],defaults:{ask:null,plan:null,agent:null},conversation:{language:'auto',uiLanguage:'en',fontSize:null,sendKey:'enter'}}};
-let savedState, drafts={},savingSection;
+let state:SettingsState = {limits:{},providers:[],preferences:{context:{},selected:null,favorites:[],manualModels:[],defaults:{ask:null,plan:null,agent:null},conversation:{language:'auto',uiLanguage:'en',fontSize:null,sendKey:'enter'}}};
+let savedState:SettingsState, drafts:Record<string,any>={},savingSection;
 let busy=false, editingId, formRevision=0, formPending=null, removeConfirm, section='providers', sequence=0;
 const pending=new Map(), session='settings:'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const same=(a,b)=>!!a&&!!b&&a.providerId===b.providerId&&a.modelId===b.modelId;
 const modelKey=m=>JSON.stringify([m.providerId,m.modelId]);
-const create=(tag,className,text)=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
-function request(type,data={},context={}){
+const create=(tag:string,className?:string,text?:any):any=>{const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;};
+function request(type,data={},context:{commit?:boolean;section?:string;id?:string;revision?:number;kind?:string;manualValue?:string}={}){
  if(!context.commit&&stage(type,data))return;
 const requestId=session+':'+(++sequence);pending.set(requestId,{type,...context});vscode.postMessage({type,requestId,...data});return requestId;}
 function notice(id,text='',error=false){$(id).textContent=text;$(id).classList.toggle('error',error);}
-function switchSection(next){notice('settings-notice');section=next;for(const name of ['providers','models','conversation','execution','diagnostics']){$('section-'+name).hidden=name!==next;const tab=$('nav-'+name);tab.setAttribute('aria-selected',String(name===next));tab.tabIndex=name===next?0:-1;}vscode.setState({section});if(next==='diagnostics')request('traceInfo');}
+function switchSection(next){notice('settings-notice');section=next;for(const name of ['providers','models','conversation','execution','diagnostics']){$('section-'+name).hidden=name!==next;const tab=$('nav-'+name);tab.setAttribute('aria-selected',String(name===next));tab.tabIndex=name===next?0:-1;}vscode.setState({section});if(next==='diagnostics'){request('traceInfo');request('storageInfo');}}
 function updateBusy(value){busy=value;$('add-provider').disabled=value||!!formPending;$('provider-form').querySelectorAll('input,select,button').forEach(el=>el.disabled=value||formPending?.kind==='save');if(!value&&formPending?.kind!=='save')$('provider-key').disabled=$('clear-key').checked;if(formPending)$(formPending.kind==='save'?'save-provider':'test-provider').disabled=true;renderConnections();timeoutFields();}
 function catalogText(p) {
   const c = p.catalog;
@@ -23,7 +26,7 @@ function catalogText(p) {
   return 'Catálogo ainda não consultado.';
 }
 function preserveFocus(container, render) {
-  const focus = container.contains(document.activeElement) ? document.activeElement.dataset.focus : undefined;
+  const focus = container.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.focus : undefined;
   const scroll = container.scrollTop; render(); container.scrollTop = scroll;
   if(focus) container.querySelector(`[data-focus="${CSS.escape(focus)}"]`)?.focus({preventScroll:true});
 }
@@ -111,7 +114,7 @@ function keyHelp() {
   $('key-hint').textContent=p?.hasKey?'Campo vazio mantém a chave atual. Cole outra para substituí-la.':optional?'Pode ficar vazio se o servidor não exigir autenticação.':'Sua chave nunca é exibida após ser salva.';
   $('provider-key').disabled=busy||$('clear-key').checked||formPending?.kind==='save';
 }
-function openForm(provider) {
+function openForm(provider?:any) {
   editingId=provider?.id; formPending=null; formRevision++; $('provider-form').hidden=false;
   $('form-title').textContent=provider?'Editar conexão':'Nova conexão';
   $('provider-kind').value=provider?.kind||'openai';$('provider-name').value=provider?.name||'OpenAI';$('provider-url').value=provider?.baseUrl||defaults.openai;$('provider-key').value='';$('clear-key').checked=false;$('tls-insecure').checked=!!provider?.tlsInsecure;$('inherit-timeouts').checked=!provider?.timeouts;$('provider-first-timeout').value=provider?.timeouts?.firstResponseTimeout||state.preferences.execution?.firstResponseTimeout||120;$('provider-idle-timeout').value=provider?.timeouts?.idleTimeout||state.preferences.execution?.idleTimeout||120;timeoutFields();
@@ -135,15 +138,15 @@ $('provider-kind').onchange=()=>{const kind=$('provider-kind').value;if(Object.v
 $('clear-key').onchange=()=>{if($('clear-key').checked)$('provider-key').value='';formChanged();keyHelp();};
 $('manual-form').onsubmit=e=>{e.preventDefault();const model={providerId:$('manual-provider').value,modelId:$('manual-id').value.trim()};if(model.modelId)request('manualModel',{model,remove:false},{manualValue:$('manual-id').value});};
 $('model-search').oninput=renderModels;
-for(const tab of document.querySelectorAll('[data-section]'))tab.onclick=()=>switchSection(tab.dataset.section);
-document.querySelector('.settings-nav').onkeydown=e=>{if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll('[data-section]')];const i=tabs.indexOf(document.activeElement);const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(['ArrowRight','ArrowDown'].includes(e.key)?1:tabs.length-1))%tabs.length;tabs[next].focus();switchSection(tabs[next].dataset.section);};
-for(const select of document.querySelectorAll('[data-default]'))select.onchange=()=>{const value=select.value?JSON.parse(select.value):null;request('setDefaultModel',{mode:select.dataset.default,model:value?{providerId:value[0],modelId:value[1]}:null});};
+for(const tab of document.querySelectorAll<HTMLInputElement>('[data-section]'))tab.onclick=()=>switchSection(tab.dataset.section);
+document.querySelector<HTMLElement>('.settings-nav').onkeydown=e=>{if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll<HTMLInputElement>('[data-section]')];const i=tabs.indexOf(document.activeElement as HTMLInputElement);const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(['ArrowRight','ArrowDown'].includes(e.key)?1:tabs.length-1))%tabs.length;tabs[next].focus();switchSection(tabs[next].dataset.section);};
+for(const select of document.querySelectorAll<HTMLInputElement>('[data-default]'))select.onchange=()=>{const value=select.value?JSON.parse(select.value):null;request('setDefaultModel',{mode:select.dataset.default,model:value?{providerId:value[0],modelId:value[1]}:null});};
 $('ui-language').onchange=()=>request('setConversation',{patch:{uiLanguage:$('ui-language').value}});
 $('language').onchange=()=>request('setConversation',{patch:{language:$('language').value}});
 $('font-size').onchange=()=>request('setConversation',{patch:{fontSize:$('font-size').value?Number($('font-size').value):null}});
 $('send-key').onchange=()=>request('setConversation',{patch:{sendKey:$('send-key').value}});
 window.addEventListener('pagehide',()=>{$('provider-key').value='';});
-window.addEventListener('message',({data:m})=>{
+onHostMessage(m=>{
  if(m.type==='state'){renderState(m.state);updateBusy(m.busy);return;}
  if(m.type==='status'){updateBusy(m.busy);return;}
  if(m.type==='settingsSection'){switchSection(m.section);return;}
@@ -175,6 +178,7 @@ function renderContext(force=false){
  $('context-source').options[0].disabled=!limit?.input;$('context-tokens').max=limit?.input||10000000;
  const version=key+JSON.stringify(config)+JSON.stringify(limit);if(force||version!==contextViewKey){contextViewKey=version;$('context-source').value=config?.source||(limit?.input?'api':'custom');$('context-tokens').value=state.contextBudgets?.[key]?.tokens||($('context-source').value==='api'?limit?.input||16384:Math.min(config?.tokens||limit?.input||16384,limit?.input||Infinity));}
  $('context-tokens').disabled=$('context-source').value==='api';
+ if($('output-limit')){$('output-limit').value=state.preferences.outputTokens?.[key]??'';$('output-limit').max=Math.min(limit?.output||Infinity,(state.contextBudgets?.[key]?.tokens||16384)-128);}
 }
 $('context-model').onchange=()=>{renderContext(true);const model=contextRef();if(model)request('modelInfo',{model});};
 $('inspect-context').onclick=()=>{const model=contextRef();if(model)request('modelInfo',{model});};
@@ -190,7 +194,7 @@ executionForm.append(create('p','','Time limits apply to the next task. Active s
 const saveExecution=create('button','primary-button','Save execution limits');saveExecution.type='submit';const executionActions=create('div','execution-actions'),executionNotice=create('p','');executionNotice.id='execution-notice';executionNotice.setAttribute('role','status');executionNotice.setAttribute('aria-live','polite');executionActions.append(saveExecution,executionNotice);executionForm.append(executionActions);$('section-execution').append(executionForm);
 executionForm.oninput=()=>{executionDirty=true;notice('execution-notice',window.VortexUI.t('Unsaved changes.'));};
 executionForm.onsubmit=e=>{e.preventDefault();if(executionPending)return;const values=Object.fromEntries([...executionForm.elements].filter(e=>e.name).map(e=>[e.name,e.value===''?null:Number(e.value)]));executionPending=true;saveExecution.disabled=true;executionForm.querySelectorAll('input').forEach(input=>input.disabled=true);notice('execution-notice',window.VortexUI.t('Saving…'));request('setExecution',{execution:values},{commit:true});};
-window.addEventListener('message',({data:m})=>{if(m.type==='state'&&m.state.preferences.execution&&!executionDirty&&!executionPending&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});
+onHostMessage(m=>{if(m.type==='state'&&m.state.preferences.execution&&!executionDirty&&!executionPending&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});
 
 const sandboxSection=create('section','execution-settings');sandboxSection.append(create('h2','','Isolated commands'),create('p','','Autonomous commands use a local Docker container. Without Docker, commands require host approval. Network is off by default.'));
 const setupSandbox=create('button','secondary-button','Download sandbox image');setupSandbox.onclick=()=>request('setupSandbox');sandboxSection.append(setupSandbox);$('section-execution').append(sandboxSection);
@@ -199,33 +203,50 @@ function timeoutFields(){for(const id of ['provider-first-timeout','provider-idl
 $('inherit-timeouts').onchange=timeoutFields;
 function sectionState(name,text='Unsaved changes.',error=false){for(const key of ['models','conversation']){const fields=$('fields-'+key);if(fields)fields.disabled=savingSection===key;const save=$('save-'+key),discard=$('discard-'+key);if(save)save.disabled=!drafts[key]||!!savingSection;if(discard)discard.disabled=!drafts[key]||!!savingSection;}const n=$('section-'+name+'-notice');if(n){n.textContent=window.VortexUI.t(text);n.classList.toggle('error',error);}}
 function stage(type,data){
- if(['setConversation','favoriteModel','manualModel','setDefaultModel','setToolProtocol','setContext'].includes(type))notice('settings-notice');
- const modelTypes=['favoriteModel','manualModel','setDefaultModel','setToolProtocol','setContext'];
+ if(['setConversation','favoriteModel','manualModel','setDefaultModel','setToolProtocol','setContext','setOutput'].includes(type))notice('settings-notice');
+ const modelTypes=['favoriteModel','manualModel','setDefaultModel','setToolProtocol','setContext','setOutput'];
  if(type==='setConversation'){drafts.conversation={...(drafts.conversation||state.preferences.conversation),...data.patch};sectionState('conversation');return true;}
  if(!modelTypes.includes(type))return false;
- const p=drafts.models||structuredClone(Object.fromEntries(['defaults','favorites','manualModels','toolProtocols','context'].map(k=>[k,state.preferences[k]||{}])));
+ const p=drafts.models||structuredClone(Object.fromEntries(['defaults','favorites','manualModels','toolProtocols','context','outputTokens'].map(k=>[k,state.preferences[k]||{}])));
  if(type==='favoriteModel'){p.favorites=p.favorites.filter(r=>!same(r,data.model));if(data.favorite)p.favorites.push(data.model);}
  if(type==='manualModel'){p.manualModels=p.manualModels.filter(r=>!same(r,data.model));if(!data.remove)p.manualModels.push(data.model);$('manual-id').value='';}
  if(type==='setDefaultModel')p.defaults[data.mode]=data.model;
  if(type==='setToolProtocol')p.toolProtocols[modelKey(data.model)]=data.protocol;
+ if(type==='setOutput')p.outputTokens[modelKey(data.model)]=data.tokens;
  if(type==='setContext')p.context[modelKey(data.model)]={source:data.source,tokens:data.tokens};
  drafts.models=p;Object.assign(state.preferences,p);sectionState('models');renderModels();renderManual();renderDefaults();return true;
 }
 for(const name of ['models','conversation']){
  const bar=create('div','section-save'),save=create('button','primary-button','Save'),discard=create('button','secondary-button','Discard'),noticeEl=create('p','');save.id='save-'+name;discard.id='discard-'+name;noticeEl.id='section-'+name+'-notice';noticeEl.setAttribute('role','status');bar.append(save,discard,noticeEl,create('small','','Unsaved changes are discarded when this tab closes.'));const fields=create('fieldset','section-fields');fields.id='fields-'+name;const sectionEl=$('section-'+name);while(sectionEl.firstChild)fields.append(sectionEl.firstChild);sectionEl.append(fields,bar);
- save.onclick=()=>{if(!drafts[name]||savingSection)return;if(name==='models'&&!$('context-tokens').reportValidity())return;savingSection=name;sectionState(name,'Saving…');request(name==='models'?'saveModels':'setConversation',name==='models'?{settings:drafts[name]}:{patch:drafts[name]},{commit:true,section:name});};
+ save.onclick=()=>{if(!drafts[name]||savingSection)return;if(name==='models'&&(!$('context-tokens').reportValidity()||!$('output-limit').reportValidity()))return;savingSection=name;sectionState(name,'Saving…');request(name==='models'?'saveModels':'setConversation',name==='models'?{settings:drafts[name]}:{patch:drafts[name]},{commit:true,section:name});};
  discard.onclick=()=>{if(savingSection)return;delete drafts[name];renderState(savedState);sectionState(name,'Changes discarded.');};sectionState(name,'');
 }
 const resetConversation=create('button','text-button','Restore defaults');resetConversation.onclick=()=>{if(savingSection)return;drafts.conversation={language:'auto',uiLanguage:'en',fontSize:null,sendKey:'enter'};renderState(savedState);sectionState('conversation');};$('section-conversation').append(resetConversation);
 const discardExecution=create('button','secondary-button','Discard'),resetExecution=create('button','text-button','Restore defaults');discardExecution.type=resetExecution.type='button';executionActions.append(discardExecution,resetExecution);
 function fillExecution(values){for(const [key,value]of Object.entries(values))if(executionForm.elements.namedItem(key))executionForm.elements.namedItem(key).value=value??'';}
 discardExecution.onclick=()=>{if(executionPending)return;fillExecution(savedState.preferences.execution);executionDirty=false;notice('execution-notice','Changes discarded.');};resetExecution.onclick=()=>{if(executionPending)return;fillExecution({maxRounds:20,maxToolCalls:20,firstResponseTimeout:120,idleTimeout:120,commandTimeout:60,taskTimeout:1800,tokenBudget:null});executionDirty=true;notice('execution-notice','Unsaved changes.');};
-$('reset-model').onclick=()=>{const ref=contextRef();if(!ref)return;$('context-source').value=state.limits?.[modelKey(ref)]?.input?'api':'custom';$('context-tokens').value=state.limits?.[modelKey(ref)]?.input||16384;$('advanced-protocol').value='auto';$('save-context').click();};
-let testChatPending=false;const testArea=create('section','defaults-card chat-test');const testButton=create('button','secondary-button','Test chat'),cancelTest=create('button','text-button','Cancel');testButton.id='test-chat';cancelTest.id='cancel-chat-test';cancelTest.hidden=true;const testResult=create('p','notice');testResult.id='chat-test-result';testResult.setAttribute('role','status');testArea.append(create('h3','','Chat connection test'),create('p','','Uses the selected model above. No workspace context or tools are sent.'),testButton,cancelTest,testResult);document.querySelector('.context-settings').after(testArea);
+$('reset-model').onclick=()=>{const ref=contextRef();if(!ref)return;$('context-source').value=state.limits?.[modelKey(ref)]?.input?'api':'custom';$('context-tokens').value=state.limits?.[modelKey(ref)]?.input||16384;$('advanced-protocol').value='auto';$('output-limit').value='';stage('setOutput',{model:ref,tokens:null});$('save-context').click();};
+let testChatPending=false;const testArea=create('section','defaults-card chat-test');const testButton=create('button','secondary-button','Test chat'),cancelTest=create('button','text-button','Cancel');testButton.id='test-chat';cancelTest.id='cancel-chat-test';cancelTest.hidden=true;const testResult=create('p','notice');testResult.id='chat-test-result';testResult.setAttribute('role','status');testArea.append(create('h3','','Chat connection test'),create('p','','Uses the selected model above. Chat tests send no tools; tool tests read only a synthetic fixture. Workspace files are never accessed.'),testButton,cancelTest,testResult);document.querySelector('.context-settings').after(testArea);
  testButton.onclick=()=>{const model=contextRef();if(!model||busy||testChatPending)return;testChatPending=true;testButton.disabled=true;cancelTest.hidden=false;notice('chat-test-result','Testing…');request('testChat',{model});};cancelTest.onclick=()=>request('cancelTestChat');
 $('open-trace').onclick=()=>request('openTrace');$('export-trace').onclick=()=>request('exportTrace');$('clear-trace').onclick=()=>request('clearTrace');
-window.addEventListener('message',({data:m})=>{if(m.type==='status'||m.type==='state'){$('clear-trace').disabled=!!m.busy;testButton.disabled=!!m.busy||testChatPending;}});
+onHostMessage(m=>{if(m.type==='status'||m.type==='state'){$('clear-trace').disabled=!!m.busy;testButton.disabled=!!m.busy||testChatPending;}});
 
 $('save-context').hidden=true;
 const stageContext=()=>{const model=contextRef();if(!model||!$('context-tokens').checkValidity())return;request('setContext',{model,source:$('context-source').value,tokens:Number($('context-tokens').value)});};
 $('context-source').addEventListener('change',stageContext);$('context-tokens').addEventListener('input',stageContext);$('advanced-protocol').onchange=()=>{const model=contextRef();if(model)request('setToolProtocol',{model,protocol:$('advanced-protocol').value});};
+
+const toolsButton=create('button','secondary-button','Test tools'),toolsResult=create('p','notice');toolsButton.id='test-tools';toolsResult.id='tools-test-result';toolsResult.setAttribute('role','status');testArea.append(toolsButton,toolsResult);
+let toolsRequest,toolsVersion;
+toolsButton.onclick=()=>{const model=contextRef();if(!model||busy||testChatPending)return;if(drafts.models){notice('tools-test-result',window.VortexUI.t('Save model settings before testing.'),true);return;}toolsVersion=state.diagnosticVersions?.[modelKey(model)];toolsRequest=request('testTools',{model});testChatPending=true;toolsButton.disabled=true;testButton.disabled=true;cancelTest.hidden=false;notice('tools-test-result',window.VortexUI.t('Testing the tool cycle…'));};
+const outputLabel=create('label','','Maximum response tokens'),outputInput=create('input');outputLabel.htmlFor='output-limit';outputInput.id='output-limit';outputInput.type='number';outputInput.min='1';outputInput.step='1';outputInput.placeholder='Auto (up to 4096)';$('save-context').before(outputLabel,outputInput);
+outputInput.oninput=()=>{const model=contextRef();if(model&&outputInput.checkValidity())stage('setOutput',{model,tokens:outputInput.value===''?null:Number(outputInput.value)});};
+const storage=create('section','defaults-card storage-settings');storage.append(create('h3','','Local storage'));
+const storageInfo=create('p');storageInfo.id='storage-info';storageInfo.setAttribute('role','status');const retention=create('select');retention.id='retention-days';retention.setAttribute('aria-label','Session retention');for(const [value,label]of [[0,'Manual cleanup only'],[30,'30 days'],[90,'90 days'],[180,'180 days']]){const option=create('option','',label);option.value=String(value);retention.append(option);}
+const saveStorage=create('button','secondary-button','Save retention'),cleanStorage=create('button','text-button','Clean eligible sessions');saveStorage.onclick=()=>request('setStorage',{retentionDays:Number(retention.value)});cleanStorage.onclick=()=>request('cleanupStorage');storage.append(storageInfo,retention,saveStorage,cleanStorage,create('p','','Only completed inactive sessions are eligible. Deleting a session also removes its retained results and undo history. Workspace files are preserved.'));$('section-diagnostics').append(storage);
+onHostMessage(m=>{
+ if(m.type==='toolsTestResult'&&m.requestId===toolsRequest){testChatPending=false;toolsButton.disabled=false;testButton.disabled=busy;cancelTest.hidden=true;pending.delete(m.requestId);if(!same(m.model,contextRef())||state.diagnosticVersions?.[modelKey(m.model)]!==toolsVersion)return;const r=m.result;notice('tools-test-result',[['Chat',r.chat],['Streaming',r.streaming],['Tools',r.tools]].map(([name,status])=>window.VortexUI.t(name)+': '+window.VortexUI.t(status)).join(' · ')+' · '+r.protocol+' · '+r.elapsed+' ms · '+new Date(r.timestamp).toLocaleTimeString()+'\n'+window.VortexUI.t(r.message),r.tools==='failed');}
+ if(m.type==='result'&&m.requestId===toolsRequest){testChatPending=false;toolsButton.disabled=false;testButton.disabled=busy;cancelTest.hidden=true;if(!m.ok)notice('tools-test-result',m.message,true);}
+ if(m.type==='state'){const model=contextRef();if(model&&toolsVersion!==undefined&&m.state.diagnosticVersions?.[modelKey(model)]!==toolsVersion)notice('tools-test-result');}
+ if(m.type==='storageInfo'){storageInfo.textContent=m.sessions+' '+window.VortexUI.t('sessions')+' · '+(m.bytes/1048576).toFixed(1)+' MiB';retention.value=String(m.retentionDays);}
+});
+$('context-model').addEventListener('change',()=>notice('tools-test-result'));

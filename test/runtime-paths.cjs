@@ -1,0 +1,3 @@
+const fs=require('node:fs');
+exports.vscodePath=async()=>{if(process.env.VSCODE_PATH)return process.env.VSCODE_PATH;const local='/Applications/Visual Studio Code.app/Contents/MacOS/Code';if(!process.env.CI&&!process.env.VSCODE_VERSION&&fs.existsSync(local))return local;return require('@vscode/test-electron').downloadAndUnzipVSCode(process.env.VSCODE_VERSION||'stable');};
+exports.chromePath=()=>{if(process.env.CHROME_PATH)return process.env.CHROME_PATH;const local='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';return !process.env.CI&&fs.existsSync(local)?local:require('playwright-core').chromium.executablePath();};

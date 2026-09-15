@@ -1,8 +1,8 @@
 {
   "name": "vortex-agent",
   "displayName": "Vortex",
-  "description": "Seu agente de c\u00f3digo, seus modelos. BYOK para VS Code.",
-  "version": "0.7.3",
+  "description": "Seu agente de código, seus modelos. BYOK para VS Code.",
+  "version": "0.8.0",
   "publisher": "vortex-local",
   "engines": {
     "vscode": "^1.96.0"
@@ -13,7 +13,7 @@
   ],
   "main": "./dist/extension.js",
   "scripts": {
-    "compile": "tsc -p . && esbuild media/vendor-entry.js --bundle --platform=browser --format=iife --minify --outfile=media/vendor.js && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --target=node20 --outfile=dist/extension.js",
+    "compile": "tsc -p . && tsc -p tsconfig.webview.json && esbuild webview/app.ts webview/settings.ts webview/shared.ts webview/picker.ts --bundle --platform=browser --format=iife --outdir=media && esbuild media/vendor-entry.js --bundle --platform=browser --format=iife --minify --outfile=media/vendor.js && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --target=node20 --outfile=dist/extension.js",
     "watch": "node scripts/watch.cjs",
     "test": "npm run compile && node --test test/*.test.cjs",
     "vscode:prepublish": "npm run compile",
@@ -22,7 +22,7 @@
     "test:tls": "npm run compile && node --test test/tls.cjs",
     "package": "npm run compile && vsce package --allow-missing-repository --skip-license --out vortex-agent.vsix",
     "icons": "node scripts/update-icons.cjs",
-    "typecheck": "tsc -p . --noEmit",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.webview.json",
     "test:real": "npm run compile && node scripts/evaluate.cjs",
     "test:sandbox": "npm run compile && node --test test/sandbox.cjs"
   },
@@ -43,7 +43,7 @@
       },
       {
         "command": "vortex.openSettings",
-        "title": "Vortex: Abrir configura\u00e7\u00f5es"
+        "title": "Vortex: Abrir configurações"
       },
       {
         "command": "vortex.reviewChanges",
@@ -120,6 +120,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "dompurify": "^3.4.15",
     "esbuild": "^0.28.2",

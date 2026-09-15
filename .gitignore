@@ -10,3 +10,8 @@ media/vendor.js
 !.env.example
 *.pem
 *.key
+
+media/app.js
+media/settings.js
+media/shared.js
+media/picker.js

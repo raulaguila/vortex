@@ -75,3 +75,5 @@ h3 { font-size: 12px; font-weight: 600; margin: 0 0 7px; }
 @media(max-width:640px){.settings-nav { overflow:auto; }.settings-nav button { flex:0 0 auto; }}
 
 .section-fields { margin:0;padding:0;border:0;min-width:0; }
+
+.storage-settings{display:grid;gap:12px;margin-top:20px}.storage-settings p{margin:0}.storage-settings button{justify-self:start}.chat-test button{margin-right:8px;margin-bottom:8px}.context-settings #output-limit{display:block;width:100%;margin-bottom:12px}

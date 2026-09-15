@@ -1,17 +1,19 @@
+export {};
 // Shared popover behavior for model, mode and permission selectors.
 (() => {
   let active;
   class ComposerPicker {
-    constructor(panel, anchor) {
+    panel:HTMLElement;anchor:HTMLElement;trigger?:HTMLElement;
+    constructor(panel:HTMLElement, anchor:HTMLElement) {
       this.panel=panel;this.anchor=anchor;
       panel.classList.add('composer-picker');
       new ResizeObserver(()=>this.position()).observe(anchor);
       panel.addEventListener('keydown',event=>{
-        const controls=[...panel.querySelectorAll('input:not(:disabled),button:not(:disabled)')].filter(el=>el.getClientRects().length);
+        const controls=[...panel.querySelectorAll<HTMLElement>('input:not(:disabled),button:not(:disabled)')].filter(el=>el.getClientRects().length);
         if(event.key==='Escape'){event.preventDefault();event.stopPropagation();this.close();return;}
         if(!['ArrowDown','ArrowUp','Tab','Home','End'].includes(event.key)||!controls.length)return;
-        if(['Home','End'].includes(event.key)&&event.target.tagName==='INPUT')return;
-        event.preventDefault();const index=controls.indexOf(document.activeElement);
+        if(['Home','End'].includes(event.key)&&(event.target as HTMLElement).tagName==='INPUT')return;
+        event.preventDefault();const index=controls.indexOf(document.activeElement as HTMLElement);
         const next=event.key==='Home'?0:event.key==='End'?controls.length-1:(index+(event.key==='ArrowUp'||event.shiftKey?controls.length-1:1))%controls.length;
         controls[next].focus();
       });

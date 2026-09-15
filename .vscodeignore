@@ -13,3 +13,6 @@ node_modules/**
 dist/**
 !dist/extension.js
 scripts/**
+
+webview/**
+tsconfig.webview.json

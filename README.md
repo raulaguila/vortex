@@ -4,7 +4,7 @@ Extensão de código BYOK para VS Code. Interface em inglês ou português, segu
 
 ## Desenvolvimento e instalação
 
-Node.js 22 e VS Code 1.96+.
+Node.js 22 ou 24 e VS Code 1.96+.
 
 ```sh
 make install
@@ -15,6 +15,19 @@ make package
 Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute `make install-vsix`. Para desenvolvimento, pressione F5 ou use `make watch`, que recompila o bundle e verifica TypeScript.
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
+
+## Versão 0.8.0
+
+- O chat, o teste de ferramentas e as avaliações usam o mesmo motor, com validação, recuperação e limites consistentes.
+- **Modelos → Test tools** verifica leitura fictícia → resultado → resposta final. Exibe capacidades observadas e o protocolo efetivo. Não acessa o workspace nem substitui o último fluxo de diagnóstico.
+- **Maximum response tokens** define a saída por conexão/modelo; vazio mantém Automático (até 4.096). O limite é reservado no contexto e vale a partir da próxima execução.
+- Comandos exibem saída ao vivo. Timeouts e operações interrompidas preservam resultado incerto, sem repetição automática. A continuação exige revisão explícita.
+- Resultados extensos ficam disponíveis entre mensagens e reinicializações, até 64 MiB por sessão. Resultados expirados são identificados como parciais.
+- A compactação também cobre turnos longos, preservando pedido atual e o último grupo de chamadas/resultados. Sessões têm revisão e bloqueio entre janelas.
+- **Diagnósticos → Local storage** mostra uso de disco e retenção: manual por padrão; 30, 90 ou 180 dias opcionais. Somente sessões concluídas e inativas são elegíveis. Excluir uma sessão também remove resultados e histórico de desfazer; arquivos do workspace são preservados.
+- Webviews em TypeScript, com contratos de mensagens validados. O CI inclui UI, Extension Host e Docker obrigatório em Linux; releases dependem desses jobs.
+
+O formato do `last-flow.json` permanece compatível. As preferências e sessões antigas migram sem alterar IDs ou credenciais. Consulte [a validação da versão](docs/validation-0.8.0.md).
 
 ## Versão 0.7.3
 
@@ -100,7 +113,7 @@ O executor impõe o modo independentemente do prompt. Saudações não iniciam f
 
 ### Container opcional
 
-Instale e inicie um runtime Docker local. Em **Settings → Conversation → Download sandbox image**, prepare a imagem. O padrão é `node:22-bookworm-slim`; pode ser substituído em `vortex.sandbox.image`. Cada execução resolve o ID imutável da imagem local e não baixa imagens silenciosamente.
+Instale e inicie um runtime Docker local. Em **Settings → Execution → Download sandbox image**, prepare a imagem. O padrão é `node:22-bookworm-slim`; pode ser substituído em `vortex.sandbox.image`. Cada execução resolve o ID imutável da imagem local e não baixa imagens silenciosamente.
 
 O comando recebe uma cópia textual do projeto, sem montar o workspace original para escrita. Rede desativada, usuário sem privilégios, capacidades removidas, raiz somente leitura e limites de CPU, memória e processos. Credenciais conhecidas, `.git`, links simbólicos e diretórios de dependências/saída são excluídos da cópia. Dependências precisam ser preparadas no container, com autorização de rede quando necessário.
 

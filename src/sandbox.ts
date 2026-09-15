@@ -1,3 +1,4 @@
+import {ExecutionError} from './execution';
 import {mkdtemp,readdir,readFile,mkdir,writeFile,rm,lstat} from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -39,7 +40,7 @@ export class Sandbox {
  }
  async available(){if(process.platform==='win32')return false;return new Promise<boolean>(resolve=>execFile('docker',['info','--format','{{.ServerVersion}}'],{timeout:5000},error=>resolve(!error)));}
  async dispose(){if(this.cleanupFailed)return;if(this.leaseFile)await rm(this.leaseFile,{force:true});if(this.directory)await rm(this.directory,{recursive:true,force:true});this.directory=undefined;}
- async execute(root:string,command:string,signal:AbortSignal,timeout:number,network=false,image='node:22-bookworm-slim'){
+ async execute(root:string,command:string,signal:AbortSignal,timeout:number,network=false,image='node:22-bookworm-slim',onOutput?:(stream:'stdout'|'stderr',text:string)=>void){
   image=await new Promise<string>((resolve,reject)=>execFile('docker',['image','inspect','--format','{{.Id}}',image],{timeout:10000},(error,stdout)=>!error&&/^sha256:[a-f0-9]{64}$/.test(stdout.trim())?resolve(stdout.trim()):reject(new Error('Sandbox image is not available locally. Use Download sandbox image in settings.'))));
   if(this.cleanupFailed)throw new Error('Sandbox cleanup failed. Stop this task and check Docker.');
   if(!this.directory)this.directory=await mkdtemp(path.join(os.tmpdir(),'vortex-sandbox-'));
@@ -49,12 +50,12 @@ export class Sandbox {
   this.previous=before;
   const name='vortex-'+randomUUID();const args=['run','--rm','--name',name,'--pull','never','--network',network?'bridge':'none','--read-only','--cap-drop=ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',`${process.getuid?.()||1000}:${process.getgid?.()||1000}`,'--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--env','HOME=/tmp','--mount',`type=bind,src=${this.directory},dst=/workspace`,'--workdir','/workspace',image,'sh','-lc',command];
   if(this.artifactsDirectory){await mkdir(this.artifactsDirectory,{recursive:true});this.leaseFile=path.join(this.artifactsDirectory,'lease-'+name+'.json');await writeFile(this.leaseFile,JSON.stringify({name,directory:this.directory,pid:process.pid}),{mode:0o600});}
-  let output='',error:string|undefined;
-  try{output=await runCommand(['docker',...args.map(shellQuote)].join(' '),root,signal,timeout);}catch(e){error=(e as Error).message;}
+  let output='',error:string|undefined,failure:Error|undefined;
+  try{output=await runCommand(['docker',...args.map(shellQuote)].join(' '),root,signal,timeout,1024*1024,onOutput);}catch(e){failure=e instanceof Error?e:new Error(String(e));error=failure.message;}
   finally{this.cleanupFailed=!await removeContainer(name);if(!this.cleanupFailed&&this.leaseFile){await rm(this.leaseFile,{force:true});this.leaseFile=undefined;}}
-  image=await new Promise<string>((resolve,reject)=>execFile('docker',['image','inspect','--format','{{.Id}}',image],{timeout:10000},(error,stdout)=>!error&&/^sha256:[a-f0-9]{64}$/.test(stdout.trim())?resolve(stdout.trim()):reject(new Error('Sandbox image is not available locally. Use Download sandbox image in settings.'))));
-  if(this.cleanupFailed)throw new Error('Could not confirm container cleanup. Recovery information was retained.');
-  signal.throwIfAborted();const after=await snapshotTree(this.directory);
+
+  if(this.cleanupFailed)throw new ExecutionError('uncertain_outcome','Could not confirm container cleanup. Recovery information was retained.');
+  const after=await snapshotTree(this.directory);
   const changes:{path:string;before:string|null;after:string|null}[]=[];
   for(const file of new Set([...before.keys(),...after.keys()])){
     if(before.get(file)===after.get(file))continue;
@@ -71,6 +72,6 @@ export class Sandbox {
       total+=bytes.length;const target=path.join(destination,file);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});artifacts.push(target);
     }};await walk('');
   }
-  return {output,error,changes,artifacts};
+  return {output,error,failure,changes,artifacts};
  }
 }

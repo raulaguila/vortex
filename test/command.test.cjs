@@ -8,8 +8,8 @@ const quote=value=>"'"+value.replace(/'/g,"'\\''")+"'";
 test('terminal reports success, exit failure, output cap and timeout',async()=>{
  assert.match(await runCommand('echo ready',os.tmpdir(),new AbortController().signal),/Exit: 0\nready/);
  await assert.rejects(runCommand('exit 7',os.tmpdir(),new AbortController().signal),/Exit: 7/);
- await assert.rejects(runCommand('sleep 10',os.tmpdir(),new AbortController().signal,100),/timed out/);
- await assert.rejects(runCommand('yes large-output',os.tmpdir(),new AbortController().signal,1000,100),/output exceeded/);
+ await assert.rejects(runCommand('"'+process.execPath+'" -e "setTimeout(()=>{},10000)"',os.tmpdir(),new AbortController().signal,100),error=>error.code==='command_timeout'&&/timed out/.test(error.message));
+ await assert.rejects(runCommand('"'+process.execPath+'" -e "process.stdout.write(String.fromCharCode(120).repeat(10000))"',os.tmpdir(),new AbortController().signal,1000,100),/output exceeded/);
 });
 test('Stop kills the shell and an ordinary child process before it can mutate a file',{skip:process.platform==='win32'},async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-command-'));

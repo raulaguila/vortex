@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import {readFile,readdir} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
+import {contentVersion} from './contentVersion';
+export {contentVersion} from './contentVersion';
 import {Action} from './actions';
 import {safePath} from './policy';
 import {searchPage} from './searchPage';
-export const contentVersion=(text:string)=>createHash('sha256').update(text).digest('hex');
 const exclude='**/{node_modules,.git,dist,coverage,.env,.env.*,*.vsix}/**';
 async function textFile(root:string,relative:string){
  const file=await safePath(root,relative);

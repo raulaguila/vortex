@@ -5,7 +5,7 @@ import {Catalog, ModelRef, Preferences, ProviderInput, SettingsState, ModelSetti
 
 export interface Store { get<T>(key: string, fallback: T): T; update(key: string, value: unknown): Thenable<void> | Promise<void> }
 export interface Secrets { get(key: string): Thenable<string | undefined> | Promise<string | undefined>; store(key: string, value: string): Thenable<void> | Promise<void>; delete(key: string): Thenable<void> | Promise<void> }
-const emptyPreferences = (): Preferences => ({selected: null, favorites: [], manualModels: [], defaults: {ask: null, plan: null, agent: null}, conversation: defaultConversation(), context: {},execution:defaultExecution()});
+const emptyPreferences = (): Preferences => ({selected: null, favorites: [], manualModels: [], defaults: {ask: null, plan: null, agent: null}, conversation: defaultConversation(), context: {},outputTokens:{},storage:{retentionDays:0},execution:defaultExecution()});
 export class ProviderManager {
   private prefsCache?: Preferences;
   private providersCache?: Provider[];
@@ -20,13 +20,13 @@ export class ProviderManager {
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.queue.then(operation); this.queue = pending.catch(() => undefined); return pending;
   }
-  async initialize(){if(this.storage.get<any>('modelPreferences',{}).schemaVersion!==3)await this.serial(()=>this.persistPreferences(this.preferences()));}
+  async initialize(){if(this.storage.get<any>('modelPreferences',{}).schemaVersion!==4)await this.serial(()=>this.persistPreferences(this.preferences()));}
   providers(): Provider[] { if(!this.providersCache)this.providersCache=this.storage.get<Provider[]>('providers', []).map(p=>({...p,timeouts:p.timeouts&&Number.isInteger(p.timeouts.firstResponseTimeout)&&Number.isInteger(p.timeouts.idleTimeout)&&p.timeouts.firstResponseTimeout>=1&&p.timeouts.firstResponseTimeout<=3600&&p.timeouts.idleTimeout>=1&&p.timeouts.idleTimeout<=3600?p.timeouts:null}));return structuredClone(this.providersCache); }
   preferences(): Preferences {
     if(this.prefsCache) return structuredClone(this.prefsCache);
     const fallback = emptyPreferences();
     const stored = this.storage.get<Partial<Preferences>>('modelPreferences', {});
-    this.prefsCache={...fallback, ...stored, schemaVersion:3, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation},execution:migrateExecution(stored.execution)};
+    this.prefsCache={...fallback, ...stored, schemaVersion:4, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation},outputTokens:stored.outputTokens||{},storage:{retentionDays:[0,30,90,180].includes(stored.storage?.retentionDays||0)?stored.storage?.retentionDays||0:0},execution:migrateExecution(stored.execution)};
     return structuredClone(this.prefsCache);
   }
   private async persistPreferences(value: Preferences): Promise<void> {
@@ -44,11 +44,13 @@ export class ProviderManager {
     for(const ref of [...settings.favorites,...settings.manualModels,...Object.values(settings.defaults).filter((r):r is ModelRef=>!!r)])this.find(ref.providerId);
     for(const [key,value]of Object.entries(settings.context)){const [id]=JSON.parse(key);this.find(id);const limit=this.limits.get(key)?.input;if(JSON.stringify(prior.context[key])===JSON.stringify(value))continue;if(value.source==='api'&&!limit)throw new Error('Discover the API limit first.');if(limit&&value.tokens>limit)throw new Error('Context exceeds the API limit.');}
     for(const key of Object.keys(settings.toolProtocols||{}))this.find(JSON.parse(key)[0]);
+    for(const [key,n]of Object.entries(settings.outputTokens||{})){this.find(JSON.parse(key)[0]);const max=Math.min(this.limits.get(key)?.output||Infinity,(settings.context[key]?.source==='custom'?settings.context[key].tokens:this.limits.get(key)?.input||16384)-128);if(n!==null&&(!Number.isSafeInteger(n)||n<1||n>max))throw new Error('Response token limit exceeds the model or context budget.');}
     const removed=prior.manualModels.filter(m=>!settings.manualModels.some(r=>sameModel(m,r))&&!this.catalogs.get(m.providerId)?.models.includes(m.modelId));
     const gone=(m:ModelRef|null)=>m&&removed.some(r=>sameModel(m,r));
     await this.persistPreferences({...prior,...settings,selected:gone(prior.selected)?null:prior.selected,favorites:settings.favorites.filter(m=>!gone(m)),defaults:Object.fromEntries(Object.entries(settings.defaults).map(([k,m])=>[k,gone(m)?null:m])) as Preferences['defaults']});
     for(const key of new Set([...Object.keys(prior.toolProtocols||{}),...Object.keys(settings.toolProtocols||{})]))if(prior.toolProtocols?.[key]!==settings.toolProtocols?.[key])this.unsupportedTools.delete(key);
   });}
+  async setStorage(retentionDays:0|30|90|180){await this.serial(()=>this.persistPreferences({...this.preferences(),storage:{retentionDays}}));}
   async setExecution(execution:ExecutionPreferences){await this.serial(async()=>{await this.persistPreferences({...this.preferences(),execution});});}
   async setConversation(patch: Partial<ConversationPreferences>): Promise<void> {
     return this.serial(async () => { const prefs = this.preferences(); await this.persistPreferences( {...prefs, conversation: {...prefs.conversation, ...patch}}); });
@@ -61,7 +63,7 @@ export class ProviderManager {
     const preferences=this.preferences(), selected=preferences.selected;
     const refs=[...preferences.manualModels,...(selected?[selected]:[]),...providers.flatMap(p=>p.catalog.models.map(modelId=>({providerId:p.id,modelId}))),...Array.from(this.limits.keys(),key=>{const [providerId,modelId]=JSON.parse(key);return {providerId,modelId};})];
     const contextBudgets=Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.contextBudget(ref)]));
-    return {effectiveProtocols:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.toolProtocol(ref)])),selectedContext:selected?{model:selected,...this.contextBudget(selected)}:null,contextBudgets,limits:Object.fromEntries(this.limits),providers,preferences};
+    return {diagnosticVersions:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.revision(ref)])),effectiveProtocols:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.toolProtocol(ref)])),selectedContext:selected?{model:selected,...this.contextBudget(selected)}:null,contextBudgets,limits:Object.fromEntries(this.limits),providers,preferences};
   }
 
   async inspect(model: ModelRef, signal?: AbortSignal): Promise<ModelLimits> {
@@ -88,7 +90,8 @@ export class ProviderManager {
     const key=JSON.stringify([model.providerId,model.modelId]);const limit=this.limits.get(key);const config=this.preferences().context[key];
     const chosen=config?.source==='custom'?config.tokens:limit?.input||16384;
     const tokens=Math.min(chosen,limit?.input||chosen);
-    return {tokens,output:Math.min(4096,limit?.output||4096,Math.floor(tokens/4)),source:config?.source==='custom'?'custom':limit?.input?'api':'fallback'};
+    const custom=this.preferences().outputTokens?.[key];
+    return {tokens,output:custom?Math.min(custom,limit?.output||custom,tokens-128):Math.min(4096,limit?.output||4096,Math.floor(tokens/4)),source:config?.source==='custom'?'custom':limit?.input?'api':'fallback'};
   }
   toolProtocol(model:ModelRef):'native'|'compatibility' {
     const key=JSON.stringify([model.providerId,model.modelId]);
@@ -129,6 +132,7 @@ export class ProviderManager {
       this.catalogs.delete(provider.id); for(const key of this.limits.keys()) if(JSON.parse(key)[0] === provider.id) this.limits.delete(key); return provider.id;
     });
   }
+  revision(model:ModelRef){return JSON.stringify([this.connectionRevisions.get(model.providerId)||0,this.preferences().toolProtocols?.[JSON.stringify([model.providerId,model.modelId])]||'auto']);}
   async test(input: ProviderInput): Promise<number> { const {provider, key} = await this.resolve(input); return (await new Client(provider, key, this.transport,this.log).models()).length; }
   async remove(id: string): Promise<void> {
     return this.serial(async () => {
@@ -137,7 +141,7 @@ export class ProviderManager {
       for(const key of this.limits.keys())if(JSON.parse(key)[0]===id)this.limits.delete(key);
       this.versions.set(id, (this.versions.get(id) || 0) + 1); this.catalogs.delete(id);
       const prefs = this.preferences();
-      await this.persistPreferences( {...prefs, toolProtocols:Object.fromEntries(Object.entries(prefs.toolProtocols||{}).filter(([key])=>JSON.parse(key)[0]!==id)), context: Object.fromEntries(Object.entries(prefs.context).filter(([key]) => JSON.parse(key)[0] !== id)), defaults: Object.fromEntries(Object.entries(prefs.defaults).map(([mode, model]) => [mode, model?.providerId === id ? null : model])) as Preferences['defaults'], selected: prefs.selected?.providerId === id ? null : prefs.selected, favorites: prefs.favorites.filter(m => m.providerId !== id), manualModels: prefs.manualModels.filter(m => m.providerId !== id)});
+      await this.persistPreferences( {...prefs, outputTokens:Object.fromEntries(Object.entries(prefs.outputTokens||{}).filter(([key])=>JSON.parse(key)[0]!==id)),toolProtocols:Object.fromEntries(Object.entries(prefs.toolProtocols||{}).filter(([key])=>JSON.parse(key)[0]!==id)), context: Object.fromEntries(Object.entries(prefs.context).filter(([key]) => JSON.parse(key)[0] !== id)), defaults: Object.fromEntries(Object.entries(prefs.defaults).map(([mode, model]) => [mode, model?.providerId === id ? null : model])) as Preferences['defaults'], selected: prefs.selected?.providerId === id ? null : prefs.selected, favorites: prefs.favorites.filter(m => m.providerId !== id), manualModels: prefs.manualModels.filter(m => m.providerId !== id)});
       await this.secrets.delete('key:' + id);
     });
   }
