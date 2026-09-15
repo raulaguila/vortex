@@ -135,3 +135,22 @@ test('cancel during a native batch stops remaining calls and closes the transcri
  h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'read',arguments:{path:'b'}}]})});
  h.agent.execute=async()=>{tools++;h.agent.stop();return 'read';};await h.run('Read a and b');assert.equal(tools,1);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.messages.filter(m=>m.toolResult).length,2);
 });
+
+test('successful read loops stop after three identical results',async()=>{
+ const h=harness([{action:'read',path:'a'}]);await h.run('Inspect project');assert.equal(h.tools.length,3);assert.equal(h.events.at(-1).status,'stopped');
+});
+test('read versions reject later external modifications or deletion',()=>{
+ const h=harness([]);const {contentVersion}=require('../dist/readTools');h.agent.readVersions.set('/workspace/a',contentVersion('before'));
+ assert.doesNotThrow(()=>h.agent.verifyRead({path:'/workspace/a',content:'before'}));
+ assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:'after'}),/changed/);
+ assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:null}),/changed/);
+ h.agent.run=new AbortController();assert.throws(()=>h.agent.verifyRead({path:'/workspace/b',content:'existing'}),/Read the existing/);
+});
+
+test('task controls reflect saved outcomes and actual change availability',async()=>{
+ const h=harness([]);h.agent.session={id:'session',mode:'ask',runState:'complete'};await h.agent.taskState();let state=h.events.at(-1);assert.equal(state.resume,false);assert.equal(state.reviewChanges,false);assert.equal(state.implementPlan,false);
+ h.agent.session.runState='paused';await h.agent.taskState();assert.equal(h.events.at(-1).resume,true);
+ h.agent.session.pendingTool={name:'command'};await h.agent.taskState();assert.equal(h.events.at(-1).resume,false);
+ h.agent.session.mode='plan';h.agent.checklist=[{id:'a',text:'Do work',status:'pending'}];h.agent.reviews={availability:async()=>({reviewChanges:true,undoChanges:true})};await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,true);assert.equal(h.events.at(-1).undoChanges,true);
+ h.agent.run=new AbortController();await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,false);assert.equal(h.events.at(-1).undoChanges,false);
+});

@@ -22,6 +22,6 @@ test('partial and malformed native tool calls never become actions',()=>{
  assert.throws(()=>validateAction({action:'write',path:'a',content:'x'},'ask'),/not allowed/);
 });
 test('native schemas expose only the allowed tools in each mode',()=>{
- assert.deepEqual(toolDefinitions('ask').map(t=>t.name),['list','read','search','diagnostics']);
+ assert.deepEqual(toolDefinitions('ask').map(t=>t.name),['list','read','search','diagnostics','editor','question','readOutput','symbols','skill']);
  assert.equal(toolDefinitions('plan').at(-1).name,'plan');assert.equal(toolDefinitions('agent').at(-1).name,'command');assert.deepEqual(toolDefinitions('agent',true),[]);
 });

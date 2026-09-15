@@ -91,3 +91,11 @@ CI verifica compilação, contratos e pacote, com cobertura básica Windows e te
 Referências: [OpenAI tools](https://developers.openai.com/api/docs/guides/function-calling), [Ollama tools](https://docs.ollama.com/capabilities/tool-calling), [Claude streaming](https://platform.claude.com/docs/en/build-with-claude/streaming), [Docker runtime](https://docs.docker.com/engine/containers/run/).
 
 As versões anteriores e suas limitações históricas estão em [docs/history.md](docs/history.md). Licenças de dependências e ícones: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+### Ferramentas e confiabilidade (0.5.0)
+
+Os modos compartilham contratos validados, mantendo Ask e Plan sem escrita. O agente agora pode consultar editor/seleção, buscar com paginação e regex, consultar símbolos e diagnósticos, fazer várias substituições atômicas em um arquivo e pausar para uma resposta do usuário. Leituras respeitam buffers não salvos; versões detectam alterações concorrentes. Resultados extensos têm páginas recuperáveis durante a execução.
+
+Skills de projeto opcionais ficam em `.vortex/skills/<nome>/SKILL.md` e são carregadas sob demanda. Não alteram permissões. Os botões de continuidade, revisão e desfazer aparecem conforme o estado da tarefa.
+
+Consulte [validação e limites da versão](docs/validation-0.5.0.md) e a [comparação técnica das referências](docs/agent-comparison.md).

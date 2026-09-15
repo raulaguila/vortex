@@ -28,21 +28,24 @@ const root=path.resolve(__dirname,'..');
     const approvalFile=path.join(temp,'workspace','approval.txt');await fs.writeFile(approvalFile,'original');
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Explore and implement'}).click();
     await frame.locator('#prompt').fill('Change approval.txt to updated');
-    scripted=[{action:'edit',path:'approval.txt',oldText:'original',newText:'updated'}];
+    scripted=[{action:'read',path:'approval.txt'},
+      {action:'edit',path:'approval.txt',oldText:'original',newText:'updated'}];
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     const dialog=window.locator('.monaco-dialog-box');await dialog.waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     await dialog.getByRole('button',{name:/Cancel/}).click();
     await frame.locator('.message-body').filter({hasText:'Approval denied'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
-    scripted=[{action:'edit',path:'approval.txt',oldText:'original',newText:'updated'},{action:'finish',text:'Approved edit completed.'}];
+    scripted=[{action:'read',path:'approval.txt'},
+      {action:'edit',path:'approval.txt',oldText:'original',newText:'updated'},{action:'finish',text:'Approved edit completed.'}];
     await frame.locator('#prompt').fill('Apply the change to approval.txt');
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     await dialog.waitFor();assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     await dialog.getByRole('button',{name:/Permitir/}).click();
     await frame.locator('.message-body').filter({hasText:'Approved edit completed.'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');
-    scripted=[{action:'edit',path:'approval.txt',oldText:'updated',newText:'bad stale edit'},{action:'finish',text:'Concurrent edit preserved.'}];
+    scripted=[{action:'read',path:'approval.txt'},
+      {action:'edit',path:'approval.txt',oldText:'updated',newText:'bad stale edit'},{action:'finish',text:'Concurrent edit preserved.'}];
     await frame.locator('#prompt').fill('Update approval.txt once more');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     await dialog.waitFor();await fs.writeFile(approvalFile,'external edit');
     await dialog.getByRole('button',{name:/Permitir/}).click();
@@ -74,11 +77,20 @@ const root=path.resolve(__dirname,'..');
     await choose('mode','Explore and implement');
     assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
     await send('Implement the plan for approval.txt',[
+      {action:'read',path:'approval.txt'},
       {action:'edit',path:'approval.txt',oldText:'updated',newText:'autonomous'},
       {action:'plan',items:[{id:'implement',text:'Update approval.txt',status:'done'}]},
       {action:'finish',text:'Autonomous implementation verified.'}],'Autonomous implementation verified.');
     assert.equal(await fs.readFile(approvalFile,'utf8'),'autonomous');
     assert.equal(await dialog.isVisible(),false);
+    await send('Update approval.txt with two related replacements',[
+      {action:'read',path:'approval.txt'},
+      {action:'multiEdit',path:'approval.txt',edits:[{oldText:'autonomous',newText:'verified'},{oldText:'verified',newText:'atomic'}]},
+      {action:'finish',text:'Atomic update completed.'}],'Atomic update completed.');
+    assert.equal(await fs.readFile(approvalFile,'utf8'),'atomic');
+    scripted=[{action:'question',text:'Which test behavior do you prefer?',options:['Fast','Full']},{action:'finish',text:'Decision received.'}];
+    await frame.locator('#prompt').fill('Ask me which test behavior to use');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
+    const answer=window.locator('.quick-input-widget input');await answer.waitFor();await answer.fill('Full');await window.keyboard.press('Enter');await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
     await send('Create nested/new-file.txt with hello',[
       {action:'write',path:'nested/new-file.txt',content:'hello'},
       {action:'finish',text:'Nested file created.'}],'Nested file created.');
@@ -122,6 +134,6 @@ const root=path.resolve(__dirname,'..');
     await gatewaySettings.locator('#test-provider').click();await gatewaySettings.locator('#form-notice').filter({hasText:'Connection tested'}).waitFor();await gatewaySettings.locator('#save-provider').click();await gatewaySettings.locator('.connection-status').filter({hasText:'1 models'}).waitFor();await gatewaySettings.locator('#cancel-form').click();
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#prompt').fill('Validate the gateway connection');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Compatible gateway validated inside VS Code.'}).waitFor();
     await window.screenshot({path:path.join(root,'test-results','extension-host.png')});
-    console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, Plan→Agent checklist, session policy restoration, supervised edit approval/refusal, autonomous edits, and terminal approval/refusal under both policies. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
+    console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, Plan→Agent checklist, session policy restoration, supervised edit approval/refusal, autonomous edits, terminal approval/refusal under both policies, atomic multi-edit and interactive clarification. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
   }finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

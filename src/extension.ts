@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {randomBytes} from 'node:crypto';
 import {readFileSync} from 'node:fs';
+import {EditorContext} from './editorContext';
 import {AgentController} from './agent';
 import {ProviderManager} from './providerManager';
 import {parseRequest, Request, Response} from './protocol';
@@ -47,6 +48,7 @@ class VortexController implements vscode.WebviewViewProvider {
     const reviews=new ReviewService(new ChangeStore(vscode.Uri.joinPath(ctx.globalStorageUri,'changes').fsPath));ctx.subscriptions.push(reviews);
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.agent.reviewChanges()),vscode.commands.registerCommand('vortex.undoChanges',()=>this.agent.undoChanges()));
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',async(uri?:vscode.Uri)=>{await this.attachments.choose(uri);this.attachmentState();}));
+    const editor=new EditorContext();ctx.subscriptions.push(editor);
     this.providers = new ProviderManager(ctx.globalState, ctx.secrets);
     this.agent = new AgentController(this.providers, message => {
       if(message.type==='toolProgress')log({id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
@@ -57,7 +59,7 @@ class VortexController implements vscode.WebviewViewProvider {
       if(message.type === 'accepted' || message.type === 'runEnd') {
         const target = this.routes.get(message.requestId); if(target) this.post(target, message);
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
-    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath);
+    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor);
   }
   private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
   dispose() { this.agent.dispose(); this.panel?.dispose(); }

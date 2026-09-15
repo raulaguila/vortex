@@ -4,7 +4,7 @@ const {systemPrompt}=require('../dist/prompt');
 test('mode prompts have distinct objectives and expose only executable tools',()=>{
   const modes=['ask','plan','agent'];
   for(const mode of modes)for(const permission of ['supervised','autonomous']){const prompt=systemPrompt(mode,'auto',[],false,permission);
-    assert.ok(prompt.length<5500,'Keep prompt bounded');
+    assert.ok(prompt.length<10000,'Keep prompt bounded');
     for(const action of ['finish','list','read','search','diagnostics','plan','write','edit','command'])assert.equal(prompt.includes(`{"action":"${action}"`),allowedActions(mode).includes(action),mode+':'+action);
   }
   assert.match(systemPrompt('ask','en',[]),/ASK MODE/);

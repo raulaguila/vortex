@@ -20,6 +20,7 @@ export class ReviewService implements vscode.Disposable {
   if(!selected)return undefined;const after=selectHunks(change.before||'',patch,selected.map(s=>s.index));await this.store.replaceProposal(session,change.id,after);change.after=after;await this.preview(change);return after;
  }
  mark(session:string,id:string,status:Change['status']){return this.store.mark(session,id,status);}
+ async availability(session:string){const changes=await this.store.list(session);return {reviewChanges:changes.length>0,undoChanges:changes.some(c=>c.status==='applied'||c.status==='proposed')};}
  async review(session:string){const changes=await this.store.list(session);const selected=await vscode.window.showQuickPick(changes.map(c=>({label:c.path,description:c.status,change:c})),{title:'Vortex — Review changes'});if(selected)await this.preview(selected.change);}
  async undo(session:string,root:string){
   const changes=(await this.store.list(session)).filter(c=>c.status==='applied'||c.status==='proposed').reverse();

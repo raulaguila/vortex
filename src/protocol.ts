@@ -47,6 +47,7 @@ export type Response =
   | {type:'usage';model:ModelRef;input:number;output:number}
   | {type:'attachments';items:{id:string;label:string;path?:string}[]}
   | {type:'stream';id:string;text:string;done:boolean}
+  | {type:'taskState';resume:boolean;implementPlan:boolean;reviewChanges:boolean;undoChanges:boolean}
   | {type:'toolProgress';id:string;name:string;status:string;elapsed?:number}
   | { type: 'state'; state: SettingsState; busy: boolean }
   | { type: 'result'; requestId: string; ok: boolean; message?: string; providerId?: string }
