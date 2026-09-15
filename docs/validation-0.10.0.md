@@ -16,7 +16,7 @@
 
 Os resultados abaixo usam Node 22 no macOS. Respostas de provedores são simuladas, exceto quando explicitamente indicado.
 
-- 183 testes automatizados passaram: contratos, runtime, cinco adaptadores, credenciais, persistência, paginação e falhas de mutação.
+- 184 testes automatizados passaram: contratos, runtime, cinco adaptadores, credenciais, persistência, paginação e falhas de mutação.
 - Encerramento real de subprocesso antes/depois da renomeação de sessão; a retomada mantém snapshot válido e permite recuperar o bloqueio abandonado.
 - Testes UI passaram em 280/360/480 px para sidebar e 480/800/1200 px para configurações, temas claro/escuro/alto contraste. Screenshots de recuperação foram inspecionados.
 - Extension Host passou com VSIX instalado em perfil descartável: cadastro, seleção, envio, aprovações, rejeições, seis combinações modo/permissão, plano→execução, edição concorrente, Undo, resultados completos e recarga de janela.

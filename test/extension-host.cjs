@@ -9,7 +9,7 @@ const root=path.resolve(__dirname,'..');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-host-'));
   await fs.mkdir(path.join(temp,'profile','User'),{recursive:true});await fs.mkdir(path.join(temp,'workspace'));
   await fs.writeFile(path.join(temp,'profile','User','settings.json'),JSON.stringify({'vortex.sandbox.image':'vortex-host-approval-fixture:absent','security.workspace.trust.enabled':false,'workbench.startupEditor':'none','telemetry.telemetryLevel':'off','extensions.autoUpdate':false,'window.restoreWindows':'none','window.dialogStyle':'custom','workbench.colorTheme':'Default Dark Modern'}));
-  let scripted=[];
+  let scripted=[],lastFixtureAction;
   const server=createServer(async(req,res)=>{
     let payload={};const chunks=[];for await(const chunk of req)chunks.push(chunk);if(chunks.length)payload=JSON.parse(Buffer.concat(chunks).toString());
     res.setHeader('Content-Type','application/json');
@@ -21,7 +21,10 @@ const root=path.resolve(__dirname,'..');
     if(req.url==='/api/tags'){res.end(JSON.stringify({models:[{name:'vortex-test-model'}]}));return;}
     if(req.url==='/api/chat'){
       if(/^Summarize/.test(payload.messages?.[0]?.content||'')){res.end(JSON.stringify({message:{content:'Earlier fixture actions are recorded in the saved history. Preserve the current request, mode and approvals.'}}));return;}
-      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];const action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read_file',path:'vortex-connection-probe.txt'}):scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      const retryDiscovery=lastFixtureAction?.action==='list_files'&&String(payload.messages?.at(-1)?.content).includes('Workspace changed during discovery. Restart the query.');
+      if(retryDiscovery)await new Promise(resolve=>setTimeout(resolve,250));
+      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];const action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read_file',path:'vortex-connection-probe.txt'}):retryDiscovery?lastFixtureAction:scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      lastFixtureAction=action;
       if(payload.tools){const {action:name,...args}=action;res.end(JSON.stringify({done:true,done_reason:'stop',message:name==='finish'?{content:action.text}:{content:'',tool_calls:[{id:'call-'+Date.now(),function:{name,arguments:args}}]}}));}
       else res.end(JSON.stringify({message:{content:JSON.stringify(action)}}));return;
     }
@@ -120,7 +123,7 @@ const root=path.resolve(__dirname,'..');
       {action:'finish',text:'Multiple filters verified.'}],'Multiple filters verified.');
     await frame.waitForFunction(()=>document.getElementById('stop').hidden);
     const filterFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));
-    const filterResult=JSON.parse(filterFlow.turns[1].request.Messages.filter(m=>m.role==='tool').at(-1).content);
+    const filterResult=JSON.parse(filterFlow.turns.at(-1).request.Messages.filter(m=>m.role==='tool').at(-1).content);
     assert.deepEqual(filterResult.files,['README.md','filter-fixture.txt']);
     await fs.writeFile(path.join(temp,'workspace','long-output.txt'),'retained-output-marker '.repeat(500));
     scripted=[{action:'read_file',path:'long-output.txt'},{action:'finish',text:'Retained output fixture completed.'}];await frame.locator('#prompt').fill('Read long-output.txt');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Retained output fixture completed.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
@@ -214,5 +217,5 @@ const root=path.resolve(__dirname,'..');
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#prompt').fill('Validate the gateway connection');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Compatible gateway validated inside VS Code.'}).waitFor();
     await window.screenshot({path:path.join(root,'test-results','extension-host.png')});
     console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, Plan→Agent checklist, session policy restoration, supervised edit approval/refusal, autonomous edits, terminal approval/refusal under both policies, atomic multi-edit, interactive clarification and recovery of rejected editor calls in Ask, isolated tool-cycle diagnosis and response token settings. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
-  }catch(error){if(app&&app.windows().length){const page=app.windows()[0];console.error('WORKBENCH AT FAILURE:',(await page.locator('body').innerText()).slice(-6000));await page.screenshot({path:path.join(root,'test-results','host-failure.png')}).catch(()=>{});for(const frame of page.frames())if(await frame.locator('#timeline').count())console.error('CHAT AT FAILURE:',await frame.locator('#timeline').textContent());}throw error;}finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
+  }catch(error){if(app&&app.windows().length){const page=app.windows()[0];console.error('WORKBENCH AT FAILURE:',(await page.locator('body').innerText()).slice(-6000));await page.screenshot({path:path.join(root,'test-results','host-failure.png')}).catch(()=>{});for(const frame of page.frames())if(await frame.locator('#timeline').count()){console.error('CHAT AT FAILURE:',await frame.locator('#timeline').textContent());console.error('CHAT CONTROLS:',await frame.evaluate(()=>({prompt:document.getElementById('prompt')?.value,readOnly:document.getElementById('prompt')?.readOnly,sendDisabled:document.getElementById('send')?.disabled,status:document.getElementById('run-status')?.textContent,notice:document.getElementById('chat-notice')?.textContent})));}}throw error;}finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
