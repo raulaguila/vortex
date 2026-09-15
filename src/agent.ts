@@ -10,9 +10,10 @@ import {randomUUID} from 'node:crypto';
 import {runCommand} from './command';
 import {FileSnapshot,snapshotFile,verifySnapshot} from './files';
 import {Action,validateAction,ApprovalDenied,toolDefinitions,registry} from './actions';
-import {decodeReply} from './reply';
+import {compatibilityTurn,turnActions} from './turnProtocol';
 import {isSocialMessage,isActionAnnouncement} from './intent';
 import {systemPrompt} from './prompt';
+import {languageInstruction} from './conversation';
 import {projectRules} from './projectContext';
 import {fitContext,estimateTokens} from './context';
 import {Session,SessionStore} from './sessions';
@@ -139,13 +140,14 @@ export class AgentController {
         controller.signal.throwIfAborted();
         let actions:Action[];
         try {
-          actions=turn?turn.calls.length?turn.calls.map(c=>validateAction({...c.arguments as object,action:c.name},mode,conversationOnly)):[validateAction({action:'finish',text:turn.text},mode,conversationOnly)]:[decodeReply(reply,mode,conversationOnly)];
+          turn??=compatibilityTurn(reply,mode,conversationOnly);
+          actions=turnActions(turn,mode,conversationOnly);
         } catch(error) {
           if(++failures>=3) throw new Error('The model repeatedly returned invalid or unauthorized actions. No further tools will run.');
           if(!conversationOnly) messages.push({role:'user',content:JSON.stringify({toolResult:{status:'error',output:error instanceof Error?error.message:'Invalid tool arguments.'}})});
           continue;
         }
-        messages.push({role:'assistant',content:reply,...(turn?{toolCalls:turn.calls,continuation:turn.continuation,continuationKind:this.providers.providers().find(p=>p.id===msg.model.providerId)?.kind}:{})});
+        messages.push({role:'assistant',content:turn!.text,toolCalls:turn!.calls,...(native?{continuation:turn!.continuation,continuationKind:this.providers.providers().find(p=>p.id===msg.model.providerId)?.kind}:{})});
         if(turn?.text&&turn.calls.length)this.event('assistant',turn.text);
         let rulesChangedDuringResponse=false;
         for(const [index,action] of actions.entries()){
@@ -183,7 +185,16 @@ export class AgentController {
           if(failures>=3)throw new Error('Stopped after three consecutive tool failures. Review the request or try another model.');
         }
       }
-      outcome='stopped';this.event('assistant',`Step limit (${limits.maxSteps}) reached. Review progress and continue explicitly.`);
+      outcome='stopped';
+      if(toolCount>0&&failures===0&&typeof client.chat==='function'){
+        try{
+          controller.signal.throwIfAborted();const budget=this.providers.contextBudget(msg.model);
+          const summaryPrompt='Summarize the current task in Markdown. The tool-step limit was reached: this task is paused, not completed. Use only observed tool results. Separate completed work, validation actually performed and pending work. Do not call tools, propose new scope or claim unfinished work succeeded. '+languageInstruction(language);
+          const fitted=fitContext(summaryPrompt,messages,budget.tokens,budget.output,turnStart);
+          if(limits.tokenBudget===null||totalTokens+fitted.used+budget.output<=limits.tokenBudget){this.status('Summarizing progress',true);const summary=await client.chat(msg.model.modelId,summaryPrompt,fitted.messages,controller.signal,budget);controller.signal.throwIfAborted();messages.push({role:'assistant',content:summary});this.event('assistant',summary);}
+        }catch(error){if(controller.signal.aborted)throw error;this.event('activity','Progress summary unavailable\nThe saved tool results remain available.');}
+      }
+      this.event('assistant',`Step limit (${limits.maxSteps}) reached. Review progress and continue explicitly.`);
     }catch(e){outcome=controller.signal.aborted?'stopped':'error';this.event('assistant',controller.signal.aborted?'Tarefa interrompida.':(e as Error).message);}finally{
       // Close every native call/result group on interruption without claiming an action succeeded.
       for(let i=0;i<messages.length;i++)if(messages[i].toolCalls?.length){let end=i+1;while(end<messages.length&&messages[end].toolResult)end++;const answered=new Set(messages.slice(i+1,end).map(m=>m.toolResult?.id));const missing=messages[i].toolCalls!.filter(c=>!answered.has(c.id));messages.splice(end,0,...missing.map(c=>({role:'user' as const,content:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.',toolResult:{id:c.id,name:c.name,status:'error' as const,output:'Interrupted: outcome uncertain. Verify workspace; do not repeat automatically.'}})));i=end+missing.length-1;}

@@ -24,13 +24,19 @@ O transporte OpenAI-compatible usa HTTP/HTTPS do Node, com TLS insecure aplicado
 
 OpenAI, Anthropic, Gemini, Ollama e endpoints OpenAI-compatible. Múltiplas conexões, catálogo, modelos manuais, favoritos e padrão por modo. HTTP remoto é permitido; TLS insecure é opcional e restrito a uma conexão compatible. Chaves permanecem no SecretStorage.
 
-Em **Settings → Models**, cada modelo oferece **Auto**, **Native tools** ou **Compatibility**. Auto usa capacidades reportadas; para Ollama/compatible sem metadados de tools, conserva o protocolo textual. OpenAI, Anthropic e Gemini tentam tools nativas. Uma rejeição explícita de suporte pode ativar Compatibility; autenticação e falhas de rede não alteram o protocolo. O tooltip informa o protocolo efetivo.
+Em **Settings → Models**, cada modelo oferece **Auto**, **Native tools** ou **Compatibility**. Auto usa capacidades reportadas e tenta tools nativas quando a API não informa essa capacidade, inclusive em Ollama e OpenAI-compatible. Uma rejeição explícita de suporte pode ativar Compatibility; autenticação e falhas de rede não alteram o protocolo. O tooltip informa o protocolo efetivo.
 
 Tools nativas têm streaming, IDs de chamadas/resultados e validação antes de execução. A alternativa textual continua exigindo JSON completo e validado. Streams interrompidos e argumentos parciais não executam ferramentas. A qualidade das decisões continua dependendo do modelo escolhido.
 
 O chat mostra um indicador visível durante a execução: preparação, espera pelo modelo, recebimento da resposta, leitura/pesquisa de arquivos, execução de ferramentas e espera por aprovação. O estado atual é restaurado ao reabrir a sidebar e o indicador desaparece ao concluir, falhar ou interromper.
 
 As atividades concluídas ficam agrupadas em um resumo recolhível, com nomes legíveis, ícones, arquivo envolvido e duração quando registrada. Detalhes técnicos só aparecem ao expandir a atividade; sessões antigas continuam compatíveis.
+
+### Ciclo estruturado (0.6.0)
+
+As definições das ferramentas ficam separadas do system prompt. Cada resposta é normalizada como chamada de ferramentas ou resposta final; o executor valida o lote, aplica as permissões e devolve os resultados vinculados aos IDs das chamadas. O histórico acumulado segue para a próxima rodada. Compatibility adapta o protocolo textual a esse mesmo ciclo.
+
+Ao esgotar etapas, uma rodada sem ferramentas pode resumir o progresso observado, respeitando tempo e orçamento restantes; a tarefa permanece pausada. Detalhes e validação: [docs/validation-0.6.0.md](docs/validation-0.6.0.md).
 
 ### Modos e permissões
 

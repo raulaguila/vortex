@@ -3,7 +3,7 @@ import type {Kind,Message} from './providers';
 import type {ToolDefinition} from './actions';
 export interface ToolCall {id:string;name:string;arguments:unknown}
 export interface ToolResult {id:string;name:string;status:'success'|'error'|'denied';output:string}
-export interface Turn {text:string;calls:ToolCall[];continuation?:unknown;usage?:{input:number;output:number}}
+export interface Turn {kind:'tool_use'|'final';stopReason:string;text:string;calls:ToolCall[];continuation?:unknown;usage?:{input:number;output:number}}
 export class ToolsUnsupported extends Error {constructor(){super('This model or endpoint does not support native tools. Choose Compatibility.');}}
 export type ToolProtocol='auto'|'native'|'compatibility';
 export function nativePrompt(system:string):string {
@@ -13,13 +13,17 @@ function groupMessages(rows:any[],field:'parts'|'content'){const result:any[]=[]
 export function nativePayload(kind:Kind,model:string,system:string,messages:Message[],tools:ToolDefinition[],budget:{tokens:number;output:number}) {
  const continued=(m:Message)=>!m.continuationKind||m.continuationKind===kind?m.continuation:undefined;
  const text=(m:Message)=>m.content?{text:m.content}:undefined;
- if(kind==='anthropic')return {path:'/messages',body:{model,system,max_tokens:budget.output,tools:tools.map(t=>({name:t.name,description:t.description,input_schema:t.parameters})),messages:groupMessages(messages.map(m=>({role:m.role,content:m.toolResult?[{type:'tool_result',tool_use_id:m.toolResult.id,content:m.toolResult.output,is_error:m.toolResult.status!=='success'}]:continued(m)??[...(m.content?[{type:'text',text:m.content}]:[]),...(m.toolCalls||[]).map(c=>({type:'tool_use',id:c.id,name:c.name,input:c.arguments}))]})),'content')}};
- if(kind==='gemini')return {path:`/models/${encodeURIComponent(model)}:generateContent`,body:{systemInstruction:{parts:[{text:system}]},generationConfig:{maxOutputTokens:budget.output},...(tools.length?{tools:[{functionDeclarations:tools.map(t=>({name:t.name,description:t.description,parametersJsonSchema:t.parameters}))}]}:{}),contents:groupMessages(messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:m.toolResult?[{functionResponse:{...(m.toolResult.id.startsWith('call_')?{}:{id:m.toolResult.id}),name:m.toolResult.name,response:{status:m.toolResult.status,output:m.toolResult.output}}}]:continued(m)??[...(text(m)?[text(m)]:[]),...(m.toolCalls||[]).map(c=>({functionCall:{id:c.id,name:c.name,args:c.arguments}}))]})),'parts')}};
+ if(kind==='anthropic')return {path:'/messages',body:{model,system,max_tokens:budget.output,...(tools.length?{tools:tools.map(t=>({name:t.name,description:t.description,input_schema:t.inputSchema}))}:{}),messages:groupMessages(messages.map(m=>({role:m.role,content:m.toolResult?[{type:'tool_result',tool_use_id:m.toolResult.id,content:m.toolResult.output,is_error:m.toolResult.status!=='success'}]:continued(m)??[...(m.content?[{type:'text',text:m.content}]:[]),...(m.toolCalls||[]).map(c=>({type:'tool_use',id:c.id,name:c.name,input:c.arguments}))]})),'content')}};
+ if(kind==='gemini')return {path:`/models/${encodeURIComponent(model)}:generateContent`,body:{systemInstruction:{parts:[{text:system}]},generationConfig:{maxOutputTokens:budget.output},...(tools.length?{tools:[{functionDeclarations:tools.map(t=>({name:t.name,description:t.description,parametersJsonSchema:t.inputSchema}))}]}:{}),contents:groupMessages(messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:m.toolResult?[{functionResponse:{...(m.toolResult.id.startsWith('call_')?{}:{id:m.toolResult.id}),name:m.toolResult.name,response:{status:m.toolResult.status,output:m.toolResult.output}}}]:continued(m)??[...(text(m)?[text(m)]:[]),...(m.toolCalls||[]).map(c=>({functionCall:{id:c.id,name:c.name,args:c.arguments}}))]})),'parts')}};
  const wire=messages.map(m=>m.toolResult?{role:'tool',content:m.toolResult.output,...(kind==='ollama'?{tool_name:m.toolResult.name}:{tool_call_id:m.toolResult.id})}:{role:m.role,content:m.content,...(continued(m)&&typeof continued(m)==='object'?continued(m) as Record<string,unknown>:{}),...(m.toolCalls?.length?{tool_calls:m.toolCalls.map(c=>({id:c.id,type:'function',function:{name:c.name,arguments:kind==='ollama'?c.arguments:JSON.stringify(c.arguments)}}))}:{})});
- return {path:kind==='ollama'?'/api/chat':'/chat/completions',body:{model,messages:[{role:'system',content:system},...wire],tools:tools.map(t=>({type:'function',function:t})),stream:false,...(kind==='ollama'?{options:{num_ctx:budget.tokens,num_predict:budget.output}}:kind==='compatible'?{max_tokens:budget.output}:{max_completion_tokens:budget.output})}};
+ return {path:kind==='ollama'?'/api/chat':'/chat/completions',body:{model,messages:[{role:'system',content:system},...wire],...(tools.length?{tools:tools.map(t=>({type:'function',function:{name:t.name,description:t.description,parameters:t.inputSchema}}))}:{}),stream:false,...(kind==='ollama'?{options:{num_ctx:budget.tokens,num_predict:budget.output}}:kind==='compatible'?{max_tokens:budget.output}:{max_completion_tokens:budget.output})}};
 }
 export function decodeNative(kind:Kind,raw:any):Turn {
+ if(!raw||typeof raw!=='object')throw new Error('Invalid provider response.');
+ const finish=raw.stop_reason??raw.done_reason??raw.choices?.[0]?.finish_reason??raw.candidates?.[0]?.finishReason;
+ if(['content_filter','SAFETY','RECITATION','refusal'].includes(finish)||raw.choices?.[0]?.message?.refusal||raw.promptFeedback?.blockReason)throw new Error('Provider blocked the response. No tools will run.');
  if(raw.stop_reason==='max_tokens'||raw.done_reason==='length'||raw.choices?.[0]?.finish_reason==='length'||raw.candidates?.[0]?.finishReason==='MAX_TOKENS')throw new Error('The model response reached the output limit. No partial tools will run.');
+ if(finish!==undefined&&finish!==null&&!['stop','end_turn','STOP','tool_use','tool_calls','function_call'].includes(finish))throw new Error('Unrecognized provider completion state. No tools will run.');
  let text='',calls:ToolCall[]=[],continuation:unknown;
  if(kind==='anthropic'){
   if(!Array.isArray(raw.content))throw new Error('Invalid Anthropic response.');
@@ -36,8 +40,9 @@ export function decodeNative(kind:Kind,raw:any):Turn {
   calls=(message.tool_calls||[]).map((c:any,i:number)=>({id:c.id||`call_${i}`,name:c.function?.name,arguments:typeof c.function?.arguments==='string'?JSON.parse(c.function.arguments):c.function?.arguments}));
  }
  if(typeof text!=='string'||calls.some(c=>typeof c.id!=='string'||!c.id||typeof c.name!=='string'||!c.name)||new Set(calls.map(c=>c.id)).size!==calls.length||calls.length>50)throw new Error('Invalid tool response.');
+ if(['tool_use','tool_calls','function_call'].includes(finish)&&!calls.length)throw new Error('Provider signaled tool use but returned no tool calls. Check the gateway response format.');
  if(!text&&!calls.length)throw new Error('The model returned neither text nor tools.');
  const input=raw.usage?.prompt_tokens??raw.usage?.input_tokens??raw.usageMetadata?.promptTokenCount??raw.prompt_eval_count;
  const output=raw.usage?.completion_tokens??raw.usage?.output_tokens??raw.usageMetadata?.candidatesTokenCount??raw.eval_count;
- return {text,calls,continuation,...(Number.isFinite(input)&&Number.isFinite(output)?{usage:{input,output}}:{})};
+ return {kind:calls.length?'tool_use':'final',stopReason:typeof finish==='string'?finish:calls.length?'tool_use':'stop',text,calls,continuation,...(Number.isFinite(input)&&Number.isFinite(output)?{usage:{input,output}}:{})};
 }

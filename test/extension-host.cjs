@@ -10,7 +10,23 @@ const root=path.resolve(__dirname,'..');
   await fs.mkdir(path.join(temp,'profile','User'),{recursive:true});await fs.mkdir(path.join(temp,'workspace'));
   await fs.writeFile(path.join(temp,'profile','User','settings.json'),JSON.stringify({'security.workspace.trust.enabled':false,'workbench.startupEditor':'none','telemetry.telemetryLevel':'off','extensions.autoUpdate':false,'window.restoreWindows':'none','window.dialogStyle':'custom','workbench.colorTheme':'Default Dark Modern'}));
   let scripted=[];
-  const server=createServer((req,res)=>{res.setHeader('Content-Type','application/json');if(req.url.startsWith('/company/')){if(req.headers.authorization!=='Bearer fixture-company-key'){res.statusCode=401;res.end('{}');return;}res.end(JSON.stringify(req.url==='/company/models'?{data:[{id:'company-model'}]}:req.url==='/company/chat/completions'?{choices:[{message:{content:JSON.stringify({action:'finish',text:'Compatible gateway validated inside VS Code.'})}}]}:{}));return;}if(req.url==='/api/show'){res.end(JSON.stringify({model_info:{'test.context_length':32768}}));return;}if(req.url==='/api/tags')res.end(JSON.stringify({models:[{name:'vortex-test-model'}]}));else if(req.url==='/api/chat')res.end(JSON.stringify({message:{content:JSON.stringify(scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'})}}));else{res.statusCode=404;res.end('{}');}});
+  const server=createServer(async(req,res)=>{
+    let payload={};const chunks=[];for await(const chunk of req)chunks.push(chunk);if(chunks.length)payload=JSON.parse(Buffer.concat(chunks).toString());
+    res.setHeader('Content-Type','application/json');
+    if(req.url.startsWith('/company/')){
+      if(req.headers.authorization!=='Bearer fixture-company-key'){res.statusCode=401;res.end('{}');return;}
+      res.end(JSON.stringify(req.url==='/company/models'?{data:[{id:'company-model'}]}:req.url==='/company/chat/completions'?{choices:[{finish_reason:'stop',message:{content:payload.tools?'Compatible gateway validated inside VS Code.':JSON.stringify({action:'finish',text:'Compatible gateway validated inside VS Code.'})}}]}:{}));return;
+    }
+    if(req.url==='/api/show'){res.end(JSON.stringify({model_info:{'test.context_length':32768}}));return;}
+    if(req.url==='/api/tags'){res.end(JSON.stringify({models:[{name:'vortex-test-model'}]}));return;}
+    if(req.url==='/api/chat'){
+      if(/^Summarize/.test(payload.messages?.[0]?.content||'')){res.end(JSON.stringify({message:{content:'Earlier fixture actions are recorded in the saved history. Preserve the current request, mode and approvals.'}}));return;}
+      const action=scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      if(payload.tools){const {action:name,...args}=action;res.end(JSON.stringify({done:true,done_reason:'stop',message:name==='finish'?{content:action.text}:{content:'',tool_calls:[{id:'call-'+Date.now(),function:{name,arguments:args}}]}}));}
+      else res.end(JSON.stringify({message:{content:JSON.stringify(action)}}));return;
+    }
+    res.statusCode=404;res.end('{}');
+  });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let app;
   try{
     app=await _electron.launch({executablePath:process.env.VSCODE_PATH||'/Applications/Visual Studio Code.app/Contents/MacOS/Code',args:['--no-sandbox','--skip-welcome','--skip-release-notes','--disable-updates','--disable-extensions','--user-data-dir='+path.join(temp,'profile'),'--extensions-dir='+path.join(temp,'extensions'),'--extensionDevelopmentPath='+(process.env.VORTEX_EXTENSION_PATH||root),path.join(temp,'workspace')],timeout:30000});
@@ -144,5 +160,5 @@ const root=path.resolve(__dirname,'..');
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#prompt').fill('Validate the gateway connection');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Compatible gateway validated inside VS Code.'}).waitFor();
     await window.screenshot({path:path.join(root,'test-results','extension-host.png')});
     console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, Plan→Agent checklist, session policy restoration, supervised edit approval/refusal, autonomous edits, terminal approval/refusal under both policies, atomic multi-edit and interactive clarification. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
-  }finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
+  }catch(error){if(app){const page=app.windows()[0];await page.screenshot({path:path.join(root,'test-results','host-failure.png')}).catch(()=>{});for(const frame of page.frames())if(await frame.locator('#timeline').count())console.error('CHAT AT FAILURE:',await frame.locator('#timeline').innerText());}throw error;}finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

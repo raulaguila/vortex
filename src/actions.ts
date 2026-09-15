@@ -75,5 +75,5 @@ export function validateAction(value:unknown,mode:Mode,conversationOnly=false):A
  return value as Action;
 }
 export class ApprovalDenied extends Error {constructor(message='Approval denied. The turn stopped without executing the refused action.'){super(message);}}
-export interface ToolDefinition {name:string;description:string;parameters:Record<string,unknown>}
-export function toolDefinitions(mode:Mode,conversationOnly=false):ToolDefinition[]{return allowedActions(mode,conversationOnly).filter(name=>name!=='finish').map(name=>({name,description:registry[name].description,parameters:registry[name].schema}));}
+export interface ToolDefinition {name:string;description:string;inputSchema:Record<string,unknown>}
+export function toolDefinitions(mode:Mode,conversationOnly=false):ToolDefinition[]{return allowedActions(mode,conversationOnly).filter(name=>name!=='finish').map(name=>({name,description:registry[name].description,inputSchema:registry[name].schema}));}

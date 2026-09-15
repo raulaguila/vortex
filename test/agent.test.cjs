@@ -186,3 +186,9 @@ test('stop and step limits take precedence over announcement recovery',async()=>
 test('requested translations can legitimately contain an action announcement',async()=>{
  const h=harness([{action:'finish',text:'Vou explorar os arquivos.'}]);await h.run('Traduza: I will explore the files.','ask');assert.equal(h.calls.length,1);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
 });
+
+test('step exhaustion synthesizes observed results without tools and stays paused',async()=>{
+ const h=harness([]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:1,commandTimeout:60,taskTimeout:1800,tokenBudget:null}});let calls=0;
+ h.agent.providers.client=async()=>({chat:async(_model,system,messages)=>{calls++;if(system.startsWith('Summarize the current task')){assert.ok(messages.some(m=>m.toolResult?.status==='success'));return 'Inspected README; implementation is still pending.';}return JSON.stringify({action:'read',path:'README.md'});}});
+ await h.run('Inspect README','ask');assert.equal(calls,2);assert.equal(h.tools.length,1);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.session.runState,'paused');assert.ok(h.events.some(e=>e.event?.text==='Inspected README; implementation is still pending.'));
+});

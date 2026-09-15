@@ -85,7 +85,7 @@ export class ProviderManager {
     if(this.unsupportedTools.has(key))return 'compatibility';
     const supported=this.limits.get(key)?.tools;
     if(supported!==undefined)return supported?'native':'compatibility';
-    return ['openai','anthropic','gemini'].includes(this.find(model.providerId).kind)?'native':'compatibility';
+    this.find(model.providerId);return 'native';
   }
   fallbackTools(model:ModelRef):boolean{const key=JSON.stringify([model.providerId,model.modelId]);if((this.preferences().toolProtocols?.[key]||'auto')!=='auto')return false;this.unsupportedTools.add(key);return true;}
   async setToolProtocol(model:ModelRef,protocol:'auto'|'native'|'compatibility') {

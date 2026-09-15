@@ -13,7 +13,7 @@ test('native and compatibility prompts preserve identical behavioral sections',(
  }
  for(const mode of ['ask','plan','agent'])for(const tool of toolDefinitions(mode)){
   assert.equal(tool.description,registry[tool.name].description);
-  assert.equal(tool.parameters.additionalProperties,false);
+  assert.equal(tool.inputSchema.additionalProperties,false);
   assert.throws(()=>validateAction({action:tool.name,...registry[tool.name].example,unexpected:true},mode));
  }
 });
