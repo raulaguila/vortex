@@ -15,7 +15,7 @@ export class ProviderManager {
   private catalogs = new Map<string, Catalog>();
   private versions = new Map<string, number>();
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(private storage: Store, private secrets: Secrets, private transport?: typeof fetch) {}
+  constructor(private storage: Store, private secrets: Secrets, private transport?: typeof fetch, private log?:(record:Record<string,unknown>)=>void) {}
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.queue.then(operation); this.queue = pending.catch(() => undefined); return pending;
   }
@@ -91,7 +91,7 @@ export class ProviderManager {
   async setToolProtocol(model:ModelRef,protocol:'auto'|'native'|'compatibility') {
     await this.serial(async()=>{this.find(model.providerId);this.unsupportedTools.delete(JSON.stringify([model.providerId,model.modelId]));const p=this.preferences();await this.persistPreferences({...p,toolProtocols:{...p.toolProtocols,[JSON.stringify([model.providerId,model.modelId])]:protocol}});});
   }
-  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport); }
+  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport,this.log); }
   private async resolve(input: ProviderInput): Promise<{provider: Provider; key: string}> {
     const existing = input.id ? this.find(input.id) : undefined;
     if (input.clearKey && !['ollama','compatible'].includes(input.kind)) throw new Error('Este provedor exige uma API key.');
@@ -117,7 +117,7 @@ export class ProviderManager {
       this.catalogs.delete(provider.id); for(const key of this.limits.keys()) if(JSON.parse(key)[0] === provider.id) this.limits.delete(key); return provider.id;
     });
   }
-  async test(input: ProviderInput): Promise<number> { const {provider, key} = await this.resolve(input); return (await new Client(provider, key, this.transport).models()).length; }
+  async test(input: ProviderInput): Promise<number> { const {provider, key} = await this.resolve(input); return (await new Client(provider, key, this.transport,this.log).models()).length; }
   async remove(id: string): Promise<void> {
     return this.serial(async () => {
       this.find(id);const next=this.providers().filter(p=>p.id!==id);await this.storage.update('providers', next);this.providersCache=next;

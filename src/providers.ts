@@ -1,3 +1,5 @@
+import {compatibilityAnswer,responseMetadata} from './chatResponse';
+import {randomUUID} from 'node:crypto';
 import type {ModelLimits} from './protocol';
 import {compatibleRequest,connectionError} from './httpTransport';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -14,22 +16,26 @@ export function validateUrl(value: string): string {
   return u.toString().replace(/\/$/, '');
 }
 export class Client {
-  constructor(private p: Provider, private key: string, private transport?: typeof fetch) {}
+  constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void) {}
   private async request(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
     const headers: Record<string,string> = {'Content-Type':'application/json'};
     if(this.p.kind==='anthropic') { headers['x-api-key']=this.key; headers['anthropic-version']='2023-06-01'; }
     else if(this.p.kind==='gemini') headers['x-goog-api-key']=this.key;
     else if(this.key) headers.Authorization=`Bearer ${this.key}`;
+    const requestId=randomUUID(),started=Date.now();const operation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path)?'generation':'metadata';
+    this.log?.({event:'providerRequest',requestId,kind:this.p.kind,operation,attempt});
     let response: Response;
     try {
       const options: RequestInit = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(30000),redirect:'manual'};
       const url=`${validateUrl(this.p.baseUrl)}${path}`;
       response = await (this.transport?this.transport(url,options):this.p.kind==='compatible'?compatibleRequest(url,options,!!this.p.tlsInsecure):fetch(url,options));
     } catch (error) {
+      this.log?.({event:'providerTransportError',requestId,elapsed:Date.now()-started,cancelled:!!signal?.aborted});
       if(signal?.aborted) throw error;
       if(error instanceof Error && error.name === 'TimeoutError') throw new Error(`${this.p.name}: tempo de conexão esgotado. Tente novamente.`);
       throw new Error(`${this.p.name}: conexão indisponível. ${connectionError(error)}`);
     }
+    this.log?.({event:'providerResponse',requestId,httpStatus:response.status,elapsed:Date.now()-started});
     if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await delay(250*(2**attempt),undefined,{signal});return this.request(path,body,signal,consume,attempt+1);}
     if(!response.ok) {
       if([400,422].includes(response.status)&&body&&typeof body==='object'&&'tools' in body){
@@ -41,7 +47,7 @@ export class Client {
         : 'Provedor indisponível. Tente novamente.';
       await response.body?.cancel().catch(()=>undefined);throw new Error(`${this.p.name}: HTTP ${response.status}. ${detail}`);
     }
-    try { return consume?await consume(response):await response.json(); }
+    try { const result=consume?await consume(response):await response.json();if(operation==='generation')this.log?.({event:'providerResponseShape',requestId,elapsed:Date.now()-started,...responseMetadata(this.p.kind,result)});return result; }
     catch { signal?.throwIfAborted();throw new Error(`${this.p.name}: resposta inválida da API. Verifique a URL base.`); }
   }
   async models(): Promise<string[]> {
@@ -89,12 +95,10 @@ export class Client {
     // Compatibility endpoints only receive their supported role/content fields.
     messages=messages.map(m=>({role:m.role,content:[m.content,...(m.toolCalls||[]).map(call=>`Tool call ${call.name}: ${JSON.stringify(call.arguments)}`),...(m.toolResult?[`Tool result ${m.toolResult.name} (${m.toolResult.status}): ${m.toolResult.output}`]:[])].filter(Boolean).join('\n')}));
     let result:any;
-    if(this.p.kind==='anthropic') { result=await this.request('/messages',{model,system,max_tokens:budget?.output||4096,messages},signal); if(result.stop_reason==='max_tokens')throw new Error('The model response reached the output limit. Request a smaller change.');const text=result.content?.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('\n');if(!text)throw new Error('Anthropic returned no text.');return text; }
-    if(this.p.kind==='gemini') { result=await this.request(`/models/${encodeURIComponent(model)}:generateContent`,{generationConfig:{maxOutputTokens:budget?.output||4096},systemInstruction:{parts:[{text:system}]},contents:messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))},signal); if(result.candidates?.[0]?.finishReason==='MAX_TOKENS')throw new Error('The model response reached the output limit. Request a smaller change.');const text=result.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('\n'); if(!text) throw new Error('Gemini não retornou texto.'); return text; }
+    if(this.p.kind==='anthropic') {result=await this.request('/messages',{model,system,max_tokens:budget?.output||4096,messages},signal);return compatibilityAnswer(this.p.kind,result);}
+    if(this.p.kind==='gemini') {result=await this.request(`/models/${encodeURIComponent(model)}:generateContent`,{generationConfig:{maxOutputTokens:budget?.output||4096},systemInstruction:{parts:[{text:system}]},contents:messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))},signal);return compatibilityAnswer(this.p.kind,result);}
     const payload={model,...(this.p.kind==='ollama'?{options:{num_ctx:budget?.tokens||16384,num_predict:budget?.output||4096}}:this.p.kind==='compatible'?{max_tokens:budget?.output||4096}:{max_completion_tokens:budget?.output||4096}),messages:[{role:'system',content:system},...messages],stream:false};
     result=await this.request(this.p.kind==='ollama'?'/api/chat':'/chat/completions',payload,signal);
-    if(result.done_reason==='length'||result.choices?.[0]?.finish_reason==='length')throw new Error('The model response reached the output limit. Request a smaller change.');
-    const text=this.p.kind==='ollama'?result.message?.content:result.choices?.[0]?.message?.content;
-    if(typeof text!=='string'||!text) throw new Error('O modelo não retornou texto. Escolha um modelo de chat.'); return text;
+    return compatibilityAnswer(this.p.kind,result);
   }
 }

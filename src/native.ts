@@ -1,3 +1,4 @@
+import {answerText} from './chatResponse';
 import type {Kind,Message} from './providers';
 import type {ToolDefinition} from './actions';
 export interface ToolCall {id:string;name:string;arguments:unknown}
@@ -31,7 +32,7 @@ export function decodeNative(kind:Kind,raw:any):Turn {
  }else{
   const message=kind==='ollama'?raw.message:raw.choices?.[0]?.message;
   if(!message||typeof message!=='object')throw new Error('Invalid chat response.');
-  text=message.content||'';continuation=message.thinking?{thinking:message.thinking}:message.reasoning_content?{reasoning_content:message.reasoning_content}:undefined;
+  text=answerText(message.content);continuation=message.thinking?{thinking:message.thinking}:message.reasoning_content?{reasoning_content:message.reasoning_content}:undefined;
   calls=(message.tool_calls||[]).map((c:any,i:number)=>({id:c.id||`call_${i}`,name:c.function?.name,arguments:typeof c.function?.arguments==='string'?JSON.parse(c.function.arguments):c.function?.arguments}));
  }
  if(typeof text!=='string'||calls.some(c=>typeof c.id!=='string'||!c.id||typeof c.name!=='string'||!c.name)||new Set(calls.map(c=>c.id)).size!==calls.length||calls.length>50)throw new Error('Invalid tool response.');

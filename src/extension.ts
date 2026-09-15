@@ -49,7 +49,7 @@ class VortexController implements vscode.WebviewViewProvider {
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.agent.reviewChanges()),vscode.commands.registerCommand('vortex.undoChanges',()=>this.agent.undoChanges()));
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',async(uri?:vscode.Uri)=>{await this.attachments.choose(uri);this.attachmentState();}));
     const editor=new EditorContext();ctx.subscriptions.push(editor);
-    this.providers = new ProviderManager(ctx.globalState, ctx.secrets);
+    this.providers = new ProviderManager(ctx.globalState, ctx.secrets,undefined,log);
     this.agent = new AgentController(this.providers, message => {
       if(message.type==='toolProgress')log({id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
       if(message.type==='runEnd')log({id:message.requestId,status:message.status});

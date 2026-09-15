@@ -43,6 +43,6 @@ test('provider output truncation is reported before a partial action reaches exe
  for(const kind of ['openai','compatible','ollama','anthropic','gemini']){
   const result=kind==='ollama'?{done_reason:'length'}:kind==='anthropic'?{stop_reason:'max_tokens'}:kind==='gemini'?{candidates:[{finishReason:'MAX_TOKENS'}]}:{choices:[{finish_reason:'length'}]};
   const client=new Client({id:'p',kind,name:'test',baseUrl:'https://example.com'},'',async()=>new Response(JSON.stringify(result)));
-  await assert.rejects(client.chat('model','system',[],new AbortController().signal),/output limit/);
+  await assert.rejects(client.chat('model','system',[],new AbortController().signal),/output_limit/);
  }
 });
