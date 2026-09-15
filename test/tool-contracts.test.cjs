@@ -9,7 +9,9 @@ test('native and compatibility prompts preserve identical behavioral sections',(
  for(const mode of ['ask','plan','agent'])for(const permission of ['supervised','autonomous']){
   const compatibility=systemPrompt(mode,'auto',[],false,permission),native=systemPrompt(mode,'auto',[],false,permission,'native');
   assert.equal(nativePrompt(compatibility),native);
-  assert.match(native,/Never claim an edit or test succeeded/);assert.match(native,/edit_file\/write_file arguments/);
+  assert.match(native,/Never claim success without evidence from tool results/);
+  assert.equal(native.includes('<permissions>'),mode==='agent');
+  if(mode!=='agent')assert.doesNotMatch(native,/SUPERVISED PERMISSIONS|AUTONOMOUS PERMISSIONS|edit_file\/write_file/);
  }
  for(const mode of ['ask','plan','agent'])for(const tool of toolDefinitions(mode)){
   assert.equal(tool.description,registry[tool.name].description);

@@ -1,11 +1,11 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {validateAction,allowedActions}=require('../dist/actions');
+const {validateAction,allowedActions,registry}=require('../dist/actions');
 const {systemPrompt}=require('../dist/prompt');
 test('mode prompts have distinct objectives and expose only executable tools',()=>{
   const modes=['ask','plan','agent'];
   for(const mode of modes)for(const permission of ['supervised','autonomous']){const prompt=systemPrompt(mode,'auto',[],false,permission);
     assert.ok(prompt.length<25000,'Keep prompt bounded');
-    for(const action of ['finish','list','read','search','diagnostics','plan','write','edit','command'])assert.equal(prompt.includes(`{"action":"${action}"`),allowedActions(mode).includes(action),mode+':'+action);
+    for(const action of Object.keys(registry))assert.equal(prompt.includes(`{"action":"${action}"`),allowedActions(mode).includes(action),mode+':'+action);
   }
   assert.match(systemPrompt('ask','en',[]),/ASK MODE/);
   assert.match(systemPrompt('plan','en',[]),/PLAN MODE/);
@@ -15,7 +15,7 @@ test('mode prompts have distinct objectives and expose only executable tools',()
 test('invalid tools, arguments and paths are rejected before execution',()=>{
   for(const a of [null,[],{action:'unknown'},{action:'read_file',path:'**/*'},{action:'edit_file',path:'a',old_text:'',new_text:'x'},{action:'read_file',path:'a',start_line:0},{action:'read_file',path:'a',start_line:5,end_line:2},{action:'read_file',path:'../a'},{action:'read_file',path:42},{action:'run_command',command:''},{action:'write_file',path:'a',content:'x'.repeat(200001)}])assert.throws(()=>validateAction(a,'agent'));
   assert.deepEqual(validateAction({action:'write_file',path:'a',content:''},'agent'),{action:'write_file',path:'a',content:''});
-  for(const mode of ['ask','plan'])for(const action of ['write','edit','command'])assert.throws(()=>validateAction({action},mode));
+  for(const mode of ['ask','plan'])for(const action of ['write_file','edit_file','run_command'])assert.throws(()=>validateAction({action},mode));
   assert.throws(()=>validateAction({action:'update_plan',items:[{id:'a',text:'x',status:'pending'}]},'ask'));
 });
 
@@ -32,3 +32,20 @@ test('new tool contracts validate filters, coordinates and checklist progress',(
  assert.equal(validateAction({action:'ask_user',question:'Which option?'},'ask').question,'Which option?');
  assert.throws(()=>validateAction({action:'editor',selection:false},'ask'));
 });
+
+ test('structured prompts keep modes isolated, social turns tool-free and context conditional',()=>{
+  for(const mode of ['ask','plan','agent']){
+   const prompt=systemPrompt(mode,'auto',[],false,'supervised','native');
+   assert.ok(prompt.length<3600,'Keep behavioral instructions compact');
+   const blocks=['identity','task','mode','workflow','communication'];let previous=-1;
+   for(const block of blocks){const index=prompt.indexOf('<'+block+'>');assert.ok(index>previous);previous=index;}
+   assert.doesNotMatch(prompt,/<checklist>/);
+   const social=systemPrompt(mode,'auto',[],true,'autonomous');
+   assert.match(social,/Do not resume tasks, create a checklist or use tools/);
+   assert.deepEqual(allowedActions(mode,true),['finish']);
+  }
+  const items=[{id:'one',text:'Verify behavior',status:'pending'}];
+  assert.match(systemPrompt('plan','en',items,false,'supervised','native'),/<checklist>[\s\S]*context, not authorization/);
+  assert.doesNotMatch(systemPrompt('ask','en',items,false,'supervised','native'),/<checklist>/);
+  assert.match(systemPrompt('agent','en',[],false,'supervised','native'),/If an action is denied, stop the turn/);
+ });

@@ -2,7 +2,7 @@
   "name": "vortex-agent",
   "displayName": "Vortex",
   "description": "Seu agente de código, seus modelos. BYOK para VS Code.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "vortex-local",
   "engines": {
     "vscode": "^1.96.0"

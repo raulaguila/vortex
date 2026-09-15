@@ -39,8 +39,8 @@ test('every mode and protocol distinguishes editor metadata from project evidenc
  const {registry}=require('../dist/actions');
  for(const mode of ['ask','plan','agent'])for(const protocol of ['native','compatibility']){
   const prompt=systemPrompt(mode,'auto',[],false,'supervised',protocol);
-  assert.match(prompt,/one open file does not mean the project has one file/);
-  assert.match(prompt,/list_files to discover workspace files and read relevant manifests/);
+  assert.match(prompt,/Open editor documents are not a complete workspace listing/);
+  assert.match(prompt,/For an overview, read the relevant manifests and documentation/);
  }
  assert.match(registry.get_editor_context.description,/Not a directory listing/);
 });
