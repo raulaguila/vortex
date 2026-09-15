@@ -25,7 +25,7 @@ export class SessionStore {
   create(prompt:string,mode:Mode,model:ModelRef,permission:Permission='supervised'):Session {return {id:randomUUID(),title:prompt.replace(/\s+/g,' ').slice(0,90),updatedAt:Date.now(),events:[],messages:[],checklist:[],mode,permission,model};}
   private file(id:string){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('Invalid session ID.');return path.join(this.directory,id+'.json');}
   async save(session:Session):Promise<void>{
-    const snapshot=JSON.stringify({...session,version:2,updatedAt:Date.now()});const file=this.file(session.id);
+    const snapshot=JSON.stringify({...session,version:3,updatedAt:Date.now()});const file=this.file(session.id);
     const work=this.queue.then(async()=>{await this.migration;await mkdir(this.directory,{recursive:true});await writeFile(file+'.tmp',snapshot,{mode:0o600});await rename(file+'.tmp',file);this.index?.set(session.id,{summary:{id:session.id,title:session.title,updatedAt:JSON.parse(snapshot).updatedAt},text:[session.title,session.root||'',new Date(JSON.parse(snapshot).updatedAt).toISOString().slice(0,10),...session.events.filter(e=>e.role!=='activity').map(e=>e.text)].join(' ').toLocaleLowerCase()});});this.queue=work.catch(()=>undefined);return work;
   }
   async load(id:string):Promise<Session>{
@@ -35,6 +35,7 @@ export class SessionStore {
       ||!Array.isArray(session.messages)||!session.messages.every(strings)
       ||!Array.isArray(session.events)||!session.events.every((e:any)=>e&&['user','assistant','activity'].includes(e.role)&&typeof e.text==='string')
       ||!Array.isArray(session.checklist)||!session.checklist.every((i:any)=>i&&typeof i.id==='string'&&typeof i.text==='string'&&['pending','running','done'].includes(i.status)))throw new Error('This session is damaged and cannot be opened. Other sessions are unchanged.');
+    if(session.events.some((e:any)=>e.activity!==undefined&&(!e.activity||typeof e.activity.id!=='string'||typeof e.activity.runId!=='string'||typeof e.activity.name!=='string'||typeof e.activity.output!=='string'||!['success','error','denied'].includes(e.activity.status)||!Number.isFinite(e.activity.startedAt)||!Number.isFinite(e.activity.endedAt)||e.activity.path!==undefined&&typeof e.activity.path!=='string')))throw new Error('This session contains invalid activity data.');
     if(session.root!==undefined&&typeof session.root!=='string'||session.summary!==undefined&&(!session.summary||typeof session.summary.text!=='string'||!Number.isSafeInteger(session.summary.through)||session.summary.through<0||session.summary.through>session.messages.length))throw new Error('This session contains invalid continuation metadata.');
     return {...session,...migratePolicy(session.mode,session.permission)};
   }

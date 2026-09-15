@@ -1,4 +1,5 @@
 import {mkdir,writeFile,rename} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import {decodeNative} from './native';
 import type {Kind,Message} from './providers';
@@ -13,15 +14,30 @@ function messages(body:any):any[]{
 }
 /** Same trace envelope as the reference; provider wire formats are normalized. */
 export class RunTrace {
+ private static owners=new Map<string,string>();
+ private static queues=new Map<string,Promise<void>>();
+ private id=randomUUID();private dirty=false;private scheduled?:ReturnType<typeof setTimeout>;
+ private logical?:any[];
  private secrets:string[]=[];
  private data:Record<string,any>;
- constructor(readonly path:string,metadata:Record<string,any>,private onError:()=>void=()=>{}){this.data={conversation_id:metadata.sessionId,model:metadata.model.modelId,temperature:null,max_tokens:null,system_prompt:'',user_question:metadata.prompt||'',turns:[],final_answer:'',sources:[]};}
+ constructor(readonly path:string,metadata:Record<string,any>,private onError:()=>void=()=>{}){RunTrace.owners.set(path,this.id);this.data={conversation_id:metadata.sessionId,model:metadata.model.modelId,temperature:null,max_tokens:null,system_prompt:'',user_question:metadata.prompt||'',turns:[],final_answer:'',sources:[]};}
  addSecret(secret:string){if(secret)this.secrets.push(secret);}
- async save(){try{await mkdir(dirname(this.path),{recursive:true});let json=JSON.stringify(this.data,null,2);for(const secret of this.secrets)json=json.split(JSON.stringify(secret).slice(1,-1)).join('[REDACTED]');await writeFile(this.path+'.tmp',json,{mode:0o600});await rename(this.path+'.tmp',this.path);}catch{this.onError();}}
+ prepare(system:string,history:Message[]){this.logical=[{role:'system',content:system},...history.map(m=>m.toolResult?{role:'tool',content:m.toolResult.output,tool_call_id:m.toolResult.id,tool_name:m.toolResult.name}:{role:m.role,content:m.content,...(m.toolCalls?.length?{tool_calls:calls(m.toolCalls)}:{})})];}
+ async save(){this.dirty=true;if(!this.scheduled)this.scheduled=setTimeout(()=>{this.scheduled=undefined;void this.flush();},20);}
+ async flush(){
+  clearTimeout(this.scheduled);this.scheduled=undefined;if(!this.dirty){await RunTrace.queues.get(this.path);return;}this.dirty=false;
+  const snapshot=this.data,secrets=[...this.secrets];
+  const work=(RunTrace.queues.get(this.path)||Promise.resolve()).then(async()=>{
+   if(RunTrace.owners.get(this.path)!==this.id)return;
+   try{await mkdir(dirname(this.path),{recursive:true});let json=JSON.stringify(snapshot,null,2);for(const secret of secrets)json=json.split(JSON.stringify(secret).slice(1,-1)).join('[REDACTED]');
+    const tmp=this.path+'.'+this.id+'.tmp';await writeFile(tmp,json,{mode:0o600});if(RunTrace.owners.get(this.path)===this.id)await rename(tmp,this.path);else await import('node:fs/promises').then(fs=>fs.unlink(tmp));
+   }catch{this.onError();}
+  });RunTrace.queues.set(this.path,work);await work;
+ }
+ static async settled(path:string){await RunTrace.queues.get(path);}
  async request(path:string,body:any){
- const rows=messages(body),tools=(body.tools||[]).flatMap((t:any)=>t.functionDeclarations||[t]).map((t:any)=>({name:t.function?.name||t.name,description:t.function?.description||t.description,parameters:t.function?.parameters||t.input_schema||t.parametersJsonSchema||t.parameters}));
- const known=rows.flatMap(m=>m.tool_calls||[]);for(const row of rows)if(row.role==='tool'&&!row.tool_name)row.tool_name=known.find(c=>c.id===row.tool_call_id)?.name;
- this.data.sources=rows.filter(m=>m.role==='tool').map(m=>({tool:m.tool_name||'',input:known.find(c=>c.id===m.tool_call_id)?.input||'{}',result:m.content}));
+ const rows=this.logical||messages(body),tools=(body.tools||[]).flatMap((t:any)=>t.functionDeclarations||[t]).map((t:any)=>({name:t.function?.name||t.name,description:t.function?.description||t.description,parameters:t.function?.parameters||t.input_schema||t.parametersJsonSchema||t.parameters}));
+ this.logical=undefined;const known=new Map<string,any>();const sources=[];for(const row of rows){for(const call of row.tool_calls||[])known.set(call.id,call);if(row.role==='tool'){const call=known.get(row.tool_call_id);row.tool_name??=call?.name;sources.push({tool:row.tool_name||'',input:call?.input||'{}',result:row.content});}}this.data.sources=sources;
  const max=body.max_tokens??body.max_completion_tokens??body.options?.num_predict??body.generationConfig?.maxOutputTokens??null;
  if(!this.data.turns.length){this.data.system_prompt=rows.find(m=>m.role==='system')?.content||'';this.data.max_tokens=max;this.data.temperature=body.temperature??null;}
  const entry={iteration:this.data.turns.length+1,request:{Model:body.model||this.data.model,Messages:rows,Tools:tools,Temperature:body.temperature??null,MaxTokens:max},response:null};
@@ -35,7 +51,7 @@ export class RunTrace {
  }
  async finish(status:string,history:Message[]){
  this.data.final_answer=status==='complete'?(history.at(-1)?.role==='assistant'?history.at(-1)!.content:''):'';
- const sources:any[]=[];for(const m of history){if(m.toolResult){const call=history.flatMap(h=>h.toolCalls||[]).find(c=>c.id===m.toolResult!.id);sources.push({tool:m.toolResult.name,input:JSON.stringify(call?.arguments||{}),result:m.toolResult.output});}}
- this.data.sources=sources;await this.save();
+ const sources:any[]=[],known=new Map();for(const m of history){for(const call of m.toolCalls||[])known.set(call.id,call);if(m.toolResult){const call=known.get(m.toolResult.id);sources.push({tool:m.toolResult.name,input:JSON.stringify(call?.arguments||{}),result:m.toolResult.output});}}
+ this.data.sources=sources;await this.save();await this.flush();
  }
 }

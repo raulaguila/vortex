@@ -22,7 +22,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
  try{
   browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
-  const context=await browser.newContext();const pages=new Set();let settings,chat;const errors=[];let startCount=0,copied='';
+  const context=await browser.newContext();const pages=new Set();let settings,chat;const errors=[];let startCount=0,executionSaves=0,copied='';
   const manager=new ProviderManager(new Storage(),new Secrets(),async url=>new Response(JSON.stringify(url.includes('/models/')?{context_length:32768}: {data:[{id:'chat-model'},{id:'plan-model'}]})));
   const post=(page,m)=>page.isClosed()?Promise.resolve():page.evaluate(m=>window.postMessage(m,'*'),m);
   const broadcast=async()=>{const state=await manager.snapshot();await Promise.all([...pages].filter(p=>!p.isClosed()).map(p=>post(p,{type:'state',state,busy:false})));};
@@ -39,6 +39,9 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
     case 'favoriteModel':await manager.favorite(m.model,m.favorite);break;
     case 'setDefaultModel':await manager.setDefault(m.mode,m.model);break;
     case 'applyMode':await manager.applyMode(m.mode);break;
+    case 'saveModels':await manager.saveModels(m.settings);break;
+    case 'traceInfo':await post(page,{type:'traceInfo',path:'/local/last-flow.json',exists:false,bytes:0});return;
+    case 'setExecution':executionSaves++;await manager.setExecution(m.execution);break;
     case 'setConversation':await manager.setConversation(m.patch);break;
     case 'manualModel':await manager.manual(m.model,m.remove);break;
     case 'modelInfo':await manager.inspect(m.model);break;
@@ -65,11 +68,11 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   assert.equal(await chat.locator('#prompt').inputValue(),'Keep this draft');
   await chat.locator('#open-settings').click();assert.equal([...pages].filter(p=>!p.isClosed()).length,2);
   await settings.locator('#nav-models').click();const id=manager.providers()[0].id;
-  await settings.locator('#default-plan').selectOption(JSON.stringify([id,'plan-model']));await settings.locator('#context-model').selectOption(JSON.stringify([id,'chat-model']));await settings.locator('#context-limit').filter({hasText:'32,768'}).waitFor();await settings.locator('#context-source').selectOption('custom');await settings.locator('#context-tokens').fill('8192');await settings.locator('#save-context').click();
+  await settings.locator('#default-plan').selectOption(JSON.stringify([id,'plan-model']));await settings.locator('#context-model').selectOption(JSON.stringify([id,'chat-model']));await settings.locator('#context-limit').filter({hasText:'32,768'}).waitFor();await settings.locator('#context-source').selectOption('custom');await settings.locator('#context-tokens').fill('8192');await settings.locator('#save-models').click();
   await chat.locator('#mode-trigger').click();await chat.locator('.choice-option').filter({hasText:'Analyze and create'}).click();await chat.locator('#selected-model').filter({hasText:'plan-model'}).waitFor();
   await chat.locator('#model-trigger').click();await chat.locator('#refresh-models').click();await chat.waitForFunction(()=>!document.getElementById('refresh-models').disabled);await chat.locator('.model-option').filter({hasText:'chat-model'}).click();
   await chat.locator('#context-status').filter({hasText:'8,192'}).waitFor();
-  await settings.locator('#context-source').selectOption('api');await settings.locator('#save-context').click();await chat.locator('#context-status').filter({hasText:'32,768'}).waitFor();
+  await settings.locator('#context-source').selectOption('api');await settings.locator('#save-models').click();await chat.locator('#context-status').filter({hasText:'32,768'}).waitFor();
   // API metadata arrives after the selection; the same model must update immediately.
   await manager.setContext({providerId:id,modelId:'chat-model'},'api',32768);
   manager.transport=async()=>new Response(JSON.stringify({context_length:262144}));
@@ -91,14 +94,14 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
     await chat.locator('#choice-menu').press('Escape');assert.equal(await chat.locator('#'+trigger+'-trigger').getAttribute('aria-expanded'),'false');
   }
   await chat.locator('#mode-trigger').click();await chat.locator('.choice-option').filter({hasText:'Analyze and create'}).click();
-  await settings.locator('#nav-conversation').click();await settings.locator('#send-key').selectOption('modifierEnter');await settings.locator('#font-size').selectOption('18');await settings.locator('#ui-language').selectOption('pt');await chat.locator('#mode-trigger').filter({hasText:'Planejar'}).waitFor();assert.equal(await chat.locator('#prompt').evaluate(el=>getComputedStyle(el).fontSize),'18px');
+  await settings.locator('#nav-conversation').click();await settings.locator('#send-key').selectOption('modifierEnter');await settings.locator('#font-size').selectOption('18');await settings.locator('#ui-language').selectOption('pt');assert.equal(await chat.locator('#prompt').evaluate(el=>getComputedStyle(el).fontSize),'13px');await settings.locator('#save-conversation').click();await chat.locator('#mode-trigger').filter({hasText:'Planejar'}).waitFor();assert.equal(await chat.locator('#prompt').evaluate(el=>getComputedStyle(el).fontSize),'18px');
   await chat.locator('#prompt').press('Enter');assert.equal(startCount,0);await chat.locator('#prompt').press('Control+Enter');await chat.locator('.message-body h2').waitFor();assert.equal(startCount,1);assert.equal(await chat.locator('.message-body script').count(),0);assert.equal(await chat.locator('.message-body a[href^="javascript:"]').count(),0);assert.equal(await chat.locator('#checklist-items li').count(),2);
-  await settings.locator('#ui-language').selectOption('en');await settings.locator('#font-size').selectOption('');
+  await settings.locator('#ui-language').selectOption('en');await settings.locator('#font-size').selectOption('');await settings.locator('#save-conversation').click();
   await chat.locator('#history-button').click();await chat.locator('#session-search').fill('repository');await chat.locator('#sessions-results .session-title').waitFor();await chat.locator('#close-sessions').click();
   for(const [theme,tokens]of Object.entries(themes)){
    for(const p of [chat,settings])await p.evaluate(({theme,tokens})=>{document.body.classList.remove('vscode-high-contrast','vscode-light','vscode-dark');document.body.classList.add(theme==='contrast'?'vscode-high-contrast':'vscode-'+theme);for(const [key,value]of Object.entries(tokens))document.documentElement.style.setProperty('--vscode-'+key,value);},{theme,tokens});
    for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});await chat.screenshot({path:path.join(output,`v2-${theme}-${width}-chat.png`)});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await chat.locator('#model-trigger').click();const box=await chat.locator('#model-picker').boundingBox();assert.ok(box.y>=0&&box.x>=0&&box.x+box.width<=width);await chat.screenshot({path:path.join(output,`v2-${theme}-${width}-models.png`)});await chat.locator('#close-picker').click();}
-   for(const width of [480,800,1200]){await settings.setViewportSize({width,height:800});for(const section of ['providers','models','conversation']){await settings.locator('#nav-'+section).click();await settings.screenshot({path:path.join(output,`v2-${theme}-${width}-${section}.png`)});assert.ok(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}}
+   for(const width of [480,800,1200]){await settings.setViewportSize({width,height:800});for(const section of ['providers','models','conversation','execution','diagnostics']){await settings.locator('#nav-'+section).click();await settings.screenshot({path:path.join(output,`v2-${theme}-${width}-${section}.png`)});assert.ok(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}}
   }
   // Representative conversation and functional message actions.
   const longMessage='Please improve the account screen.\n'.repeat(24);
@@ -126,7 +129,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   for(const width of [280,360,480,538]){
     await chat.setViewportSize({width,height:1030});await chat.locator('#prompt').fill('');
     await chat.evaluate(tokens=>{document.body.className='vscode-dark';for(const key of [...document.documentElement.style])if(key.startsWith('--vscode-'))document.documentElement.style.removeProperty(key);for(const [key,value]of Object.entries(tokens))document.documentElement.style.setProperty('--vscode-'+key,value);document.getElementById('timeline').scrollTop=0;},themes.dark);
-    const bounds=await chat.locator('.composer').boundingBox();assert.equal(Math.round(bounds.x),16);assert.equal(Math.round(width-bounds.x-bounds.width),16);assert.ok(bounds.height<=(width>430?110:145));
+    const bounds=await chat.locator('.composer').boundingBox();assert.equal(Math.round(bounds.x),16);assert.equal(Math.round(width-bounds.x-bounds.width),16);assert.ok(bounds.height<=(width>430?116:152));
     await chat.screenshot({path:path.join(output,`v5-spacing-${width}.png`)});
   }
   for(const [text,expected]of [['Waiting for model','Waiting for model'],['Reading file · src/example.ts','Reading file · src/example.ts'],['Running command','Running command'],['Waiting for approval','Waiting for approval']]){
@@ -142,7 +145,21 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   await post(chat,{type:'taskState',resume:false,implementPlan:false,reviewChanges:false,undoChanges:false});assert.equal(await chat.locator('.task-actions').isVisible(),false);
   await post(chat,{type:'taskState',resume:true,implementPlan:false,reviewChanges:true,undoChanges:false});assert.equal(await chat.locator('[data-task-action="resume"]').isVisible(),true);assert.equal(await chat.locator('[data-task-action="reviewChanges"]').isVisible(),true);assert.equal(await chat.locator('[data-task-action="undoChanges"]').isVisible(),false);
   await post(chat,{type:'status',busy:true,text:'Waiting for your answer'});assert.equal(await chat.locator('.task-actions').isVisible(),false);assert.equal(await chat.locator('.progress-label').innerText(),'Waiting for your answer');
-  await settings.locator('#cancel-form').click();await settings.locator('#nav-conversation').click();const modelTimeout=settings.locator('[name="modelTimeout"]');assert.equal(await modelTimeout.inputValue(),'120');await modelTimeout.fill('600');assert.equal(await modelTimeout.evaluate(el=>el.checkValidity()),true);await modelTimeout.fill('0');assert.equal(await modelTimeout.evaluate(el=>el.checkValidity()),false);await modelTimeout.fill('120');
-  assert.deepEqual(errors,[]);console.log('UI passed: two surfaces, modal BYOK, defaults, context, English/Portuguese, shortcuts, Markdown safety, checklist, sessions, close/reopen, Ask default/order, permission icons, bounded hover, 55 visual captures, grouped activities, copy/reuse and expanded messages. Provider responses simulated.');
+  await settings.locator('#cancel-form').click();await settings.locator('#nav-execution').click();const modelTimeout=settings.locator('[name="firstResponseTimeout"]');assert.equal(await modelTimeout.inputValue(),'120');await modelTimeout.fill('600');assert.equal(await modelTimeout.evaluate(el=>el.checkValidity()),true);await modelTimeout.fill('0');assert.equal(await modelTimeout.evaluate(el=>el.checkValidity()),false);await modelTimeout.fill('120');
+  // Section navigation wraps in both directions; reset/discard never submits the form.
+  await settings.locator('#nav-providers').focus();await settings.locator('#nav-providers').press('ArrowLeft');assert.equal(await settings.locator('#nav-diagnostics').evaluate(el=>el===document.activeElement),true);await settings.locator('#nav-diagnostics').press('ArrowRight');assert.equal(await settings.locator('#nav-providers').evaluate(el=>el===document.activeElement),true);
+  await settings.locator('#nav-execution').click();await modelTimeout.fill('600');await settings.locator('.execution-actions').getByRole('button',{name:'Save execution limits',exact:true}).click();await settings.locator('#execution-notice').filter({hasText:'Execution limits saved.'}).waitFor();assert.equal(manager.preferences().execution.firstResponseTimeout,600);const savedExecutions=executionSaves;
+  await settings.locator('.execution-actions').getByRole('button',{name:'Restore defaults',exact:true}).click();assert.equal(await modelTimeout.inputValue(),'120');await settings.locator('.execution-actions').getByRole('button',{name:'Discard',exact:true}).click();assert.equal(await modelTimeout.inputValue(),'600');assert.equal(executionSaves,savedExecutions);assert.equal(manager.preferences().execution.firstResponseTimeout,600);
+  await post(chat,{type:'status',busy:false,text:'Ready'});await settings.locator('#nav-conversation').click();await settings.locator('#font-size').selectOption('20');await settings.locator('#nav-models').click();await settings.locator('#nav-conversation').click();assert.equal(await settings.locator('#font-size').inputValue(),'20');assert.equal(await chat.locator('#prompt').evaluate(el=>getComputedStyle(el).fontSize),'13px');await settings.locator('#save-conversation').click();await chat.waitForFunction(()=>getComputedStyle(document.getElementById('prompt')).fontSize==='20px');
+  const longRef={providerId:id,modelId:'organization/very-long-model-name-with-context-and-version-'.repeat(3)};await manager.manual(longRef,false);await manager.setSelection(longRef);await broadcast();
+  for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await chat.locator('.composer').evaluate(el=>getComputedStyle(el).paddingBottom),'12px');assert.equal(await chat.locator('#run-status').isVisible(),false);await chat.screenshot({path:path.join(output,`v070-font20-${width}.png`)});}
+  await post(chat,{type:'stream',id:'partial',text:'An incomplete response',done:false});await post(chat,{type:'stream',id:'partial',text:'',done:true,incomplete:true});assert.equal(await chat.locator('.incomplete').count(),1);
+  await post(chat,{type:'runProgress',progress:{runId:'r',phase:'waiting_model',startedAt:Date.now()-5000,phaseStartedAt:Date.now()-5000}});await chat.locator('.progress-label').filter({hasText:'Waiting for model'}).waitFor();await post(chat,{type:'status',busy:false,text:'Ready'});
+  await settings.locator('#font-size').selectOption('');await settings.locator('#save-conversation').click();
+  const hcLight={...themes.light,'contrastBorder':'#0f4a85','focusBorder':'#0f4a85'};
+  for(const p of [chat,settings])await p.evaluate(tokens=>{document.body.classList.add('vscode-high-contrast-light');for(const [k,v]of Object.entries(tokens))document.documentElement.style.setProperty('--vscode-'+k,v);},hcLight);
+  for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});await chat.screenshot({path:path.join(output,`v070-hc-light-${width}.png`)});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
+  for(const width of [480,800,1200]){await settings.setViewportSize({width,height:800});for(const section of ['providers','models','conversation','execution','diagnostics']){await settings.locator('#nav-'+section).click();await settings.screenshot({path:path.join(output,`v070-hc-light-${width}-${section}.png`)});assert.ok(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}}
+  assert.deepEqual(errors,[]);console.log('UI passed: two surfaces, modal BYOK, defaults, context, English/Portuguese, shortcuts, Markdown safety, checklist, sessions, close/reopen, Ask default/order, permission icons, bounded hover, responsive visual captures including 20px font and high contrast light, grouped activities, copy/reuse and expanded messages. Provider responses simulated.');
  }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

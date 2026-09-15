@@ -1,10 +1,12 @@
 import type {Kind} from './providers';
 // Accumulate structured deltas. No caller receives tool arguments until the stream ends.
-export async function readStream(response:Response,kind:Kind,signal:AbortSignal,onText:(text:string)=>void):Promise<unknown>{
+export async function readStream(response:Response,kind:Kind,signal:AbortSignal,onText:(text:string)=>void,onProgress:()=>void=()=>{}):Promise<unknown>{
  if(!response.body)throw new Error('Empty stream.');
  const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',bytes=0,complete=false;
  const raw:any=kind==='anthropic'?{content:[]}:kind==='gemini'?{candidates:[{content:{parts:[]}}]}:kind==='ollama'?{message:{content:'',tool_calls:[]}}:{choices:[{message:{content:'',tool_calls:[]}}]};
  const accept=(data:any)=>{
+  const content=kind==='anthropic'?(data.delta?.text||data.delta?.partial_json||data.delta?.thinking||data.content_block?.type==='tool_use'):kind==='gemini'?data.candidates?.[0]?.content?.parts?.length:(data.message||data.choices?.[0]?.delta);
+  if(content&&(typeof content!=='object'||content.content||content.thinking||content.reasoning_content||content.tool_calls?.length))onProgress();
   if(data.error||data.type==='error')throw new Error('Provider stream failed.');
   if(kind==='anthropic'){
    if(data.type?.startsWith('content_block_')&&(!Number.isInteger(data.index)||data.index<0||data.index>=100))throw new Error('Invalid stream block index.');

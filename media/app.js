@@ -16,10 +16,11 @@ const runProgress=create('div','run-progress');runProgress.id='run-progress';run
 const progressSpinner=create('span','progress-spinner');progressSpinner.setAttribute('aria-hidden','true');
 const progressLabel=create('span','progress-label');progressLabel.setAttribute('role','status');progressLabel.setAttribute('aria-live','polite');
 runProgress.append(progressSpinner,progressLabel);$('timeline').after(runProgress);
-let progressText='Preparing request';
+let progressText='Preparing request',runTiming;const phaseLabels={preparing:'Preparing request',context:'Preparing context',waiting_model:'Waiting for model',receiving:'Receiving response',compacting:'Summarizing context',approval:'Waiting for approval',summarizing:'Summarizing progress',finishing:'Finishing task',recovering:'Requesting a complete response'};
 const progressTranslations={'Summarizing progress':'Resumindo progresso','Requesting a complete response':'Solicitando uma resposta completa','Waiting for your answer':'Aguardando sua resposta','Reading editor context':'Lendo contexto do editor','Reading tool output':'Lendo resultados','Inspecting symbols':'Consultando símbolos','Reading skill':'Lendo instruções do projeto','Preparing request':'Preparando solicitação','Preparing context':'Preparando contexto','Waiting for model':'Aguardando o modelo','Receiving response':'Recebendo resposta','Summarizing context':'Resumindo contexto','Waiting for approval':'Aguardando sua aprovação','Listing files':'Listando arquivos','Reading file':'Lendo arquivo','Searching files':'Pesquisando arquivos','Checking diagnostics':'Verificando diagnósticos','Updating plan':'Atualizando plano','Writing file':'Gravando arquivo','Editing file':'Editando arquivo','Removing file':'Removendo arquivo','Running command':'Executando comando','Running tool':'Executando ferramenta','Finishing task':'Finalizando tarefa','Enviando…':'Enviando…','Interrompendo…':'Interrompendo…','Trabalhando':'Preparando solicitação'};
+const toolLiveLabels={read:'Reading file',list:'Listing files',search:'Searching files',diagnostics:'Checking diagnostics',edit:'Editing file',multiEdit:'Editing file',write:'Writing file',remove:'Removing file',command:'Running command',plan:'Updating plan',question:'Waiting for your answer',readOutput:'Reading tool output',editor:'Reading editor context',symbols:'Inspecting symbols',skill:'Reading skill'};
 function showProgress(active,text){
- if(text)progressText=text;runProgress.hidden=!active;
+ if(active&&runTiming){text=phaseLabels[runTiming.phase]||(runTiming.tool?(toolLiveLabels[runTiming.tool.name]||'Running tool')+(runTiming.tool.path?' · '+runTiming.tool.path:''):'Running tool');}if(text)progressText=text;runProgress.hidden=!active;
  const [label,...detail]=progressText.split(' · '),pt=window.VortexUI.language()==='pt';
  const localized=pt?(progressTranslations[label]||label):({'Enviando…':'Sending…','Interrompendo…':'Stopping…','Trabalhando':'Preparing request'}[label]||label);
  progressLabel.textContent=[localized,...detail].join(' · ');progressLabel.title=progressLabel.textContent;
@@ -47,7 +48,7 @@ function addEvent(event) {
    group.append(activityRow(event));
  }else{
    const item=create('article',event.role);item.setAttribute('aria-label',event.role==='user'?window.VortexUI.t('You'):'Vortex');
-   const bubble=create('div','message-content'),body=markdownBody(event.text,event.role);bubble.append(body);
+   const bubble=create('div','message-content'),body=markdownBody(event.failureCode?window.VortexUI.failure(event.failureCode,event.text):event.text,event.role);bubble.append(body);
    if(event.role==='user'&&(event.text.length>600||event.text.split('\n').length>10)){
      body.classList.add('message-collapsed');const expand=create('button','expand-message',window.VortexUI.t('Show more'));expand.setAttribute('aria-expanded','false');expand.onclick=()=>{const collapsed=body.classList.toggle('message-collapsed');expand.textContent=window.VortexUI.t(collapsed?'Show more':'Show less');expand.setAttribute('aria-expanded',String(!collapsed));};bubble.append(expand);
    }
@@ -55,18 +56,18 @@ function addEvent(event) {
    if(Number.isFinite(event.timestamp)){const time=create('time','message-time',new Date(event.timestamp).toLocaleTimeString(window.VortexUI.language(),{hour:'2-digit',minute:'2-digit'}));time.dateTime=new Date(event.timestamp).toISOString();time.title=new Date(event.timestamp).toLocaleString();actions.append(time);}
    const copy=messageAction('copy','Copy message',()=>{copy.disabled=true;request('copyText',{text:event.text},{copyButton:copy});});actions.append(copy);
    if(event.role==='user')actions.append(messageAction('edit','Reuse message',()=>{if(busy||starting)return;if($('prompt').value.trim()&&$('prompt').value!==event.text){notice('chat-notice',window.VortexUI.t('Clear the current draft before reusing a message.'));return;}$('prompt').value=event.text;persist();autosize();updateBusy(busy);$('prompt').focus();}));
-   item.append(actions);timeline.append(item);
+   if(event.incomplete){item.classList.add('streaming','incomplete');item.append(create('p','partial-label',window.VortexUI.t('Incomplete response')));}item.append(actions);timeline.append(item);
  }
  if(follow||event.role==='user')timeline.scrollTop=timeline.scrollHeight;
 }
 function activityRow(event){
  const pt=window.VortexUI.language()==='pt',details=create('details','activity');
- const [raw,...lines]=event.text.split('\n'),parts=raw.split(' · '),tool=parts[0],status=['success','error','denied'].includes(parts.at(-1))?parts.pop():null;
+ const [raw,...legacyLines]=event.text.split('\n'),parts=raw.split(' · '),tool=event.activity?.name||parts[0],status=event.activity?.status||(['success','error','denied'].includes(parts.at(-1))?parts.pop():null),lines=event.activity?event.activity.output.split('\n'):legacyLines;
  const labels={multiEdit:['Edited file','Alterou arquivo','edit'],editor:['Read editor context','Leu contexto do editor','eye'],question:['Asked for clarification','Solicitou esclarecimento','ask'],readOutput:['Read more output','Leu mais resultados','eye'],symbols:['Inspected symbols','Consultou símbolos','search'],skill:['Read project skill','Leu instruções do projeto','eye'],list:['Listed project files','Listou arquivos do projeto','plan'],read:['Read file','Leu arquivo','eye'],search:['Searched the project','Pesquisou no projeto','search'],diagnostics:['Checked diagnostics','Verificou diagnósticos','search'],plan:['Updated the plan','Atualizou o plano','plan'],write:['Wrote file','Gravou arquivo','edit'],edit:['Edited file','Alterou arquivo','edit'],remove:['Removed file','Removeu arquivo','trash'],command:['Ran command','Executou comando','agent']};
  const known=labels[tool],summary=create('summary'),copy=create('span','activity-description');summary.append(choiceIcon(known?.[2]||'plan'));
  const label=status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
  copy.append(create('span','activity-label',label));
- const detail=known?(parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
+ const detail=known?(event.activity?.path||parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
  if(detail)copy.append(create('span','activity-path',detail));summary.append(copy);
  if(status==='error'||status==='denied'){details.dataset.status=status;summary.append(create('span','activity-result',status==='error'?'!':'−'));}
  if(Number.isFinite(event.durationMs)&&event.durationMs>=0){const seconds=event.durationMs/1000;summary.append(create('span','activity-duration',(seconds<1?'<1':Math.round(seconds))+'s'));}
@@ -207,8 +208,7 @@ function renderContext(){
  if(!budget){$('context-status').textContent='…';return;}
  const used=contextUsage&&same(contextUsage.model,ref)?contextUsage.used:0;
  $('context-status').textContent=(used&&!contextUsage?.reported?'~':'')+used.toLocaleString()+' / '+budget.tokens.toLocaleString();
- if(contextUsage?.reported){$('context-status').title='API reported input: '+used+'; output is accounted separately.';return;}
- $('context-status').title=window.VortexUI.language()==='pt'?`Uso estimado · orçamento ${budget.source} · ${contextUsage?.removed||0} mensagens antigas omitidas`:`Estimated usage · ${budget.source} budget · ${contextUsage?.removed||0} older messages omitted`;
+ const pt=window.VortexUI.language()==='pt';$('context-status').title=pt?`Janela configurada: ${budget.tokens} tokens\nEntrada ${contextUsage?.reported?'reportada pela API (última requisição)':'estimada'}: ${used}\nReserva de saída: ${budget.output}\nOrigem: ${budget.source}\nMensagens omitidas: ${contextUsage?.removed||0}`:`Configured window: ${budget.tokens} tokens\n${contextUsage?.reported?'API input (last request)':'Estimated input'}: ${used}\nOutput reserve: ${budget.output}\nSource: ${budget.source}\nOmitted messages: ${contextUsage?.removed||0}`;
 }
 function sessionTime(timestamp){
  const elapsed=Math.max(0,Date.now()-timestamp);const unit=elapsed<3600000?'minute':elapsed<86400000?'hour':'day';
@@ -219,7 +219,7 @@ function sessionTime(timestamp){
 const liveStreams=new Map();
 window.addEventListener('message',({data:m})=>{
  if(m.type==='stream'){
-  if(m.done){liveStreams.get(m.id)?.element.remove();liveStreams.delete(m.id);return;}
+  if(m.done){const row=liveStreams.get(m.id);if(row&&m.incomplete){row.element.classList.add('incomplete');row.element.append(create('p','partial-label',window.VortexUI.t('Incomplete response')));}else row?.element.remove();liveStreams.delete(m.id);return;}
   let row=liveStreams.get(m.id);if(!row){const element=create('article','assistant streaming');$('timeline').append(element);row={element,text:''};liveStreams.set(m.id,row);}
   const follow=$('timeline').scrollHeight-$('timeline').scrollTop-$('timeline').clientHeight<100;
   row.text+=m.text;row.element.replaceChildren(markdownBody(row.text,'assistant'));if(follow)$('timeline').scrollTop=$('timeline').scrollHeight;
@@ -228,7 +228,7 @@ window.addEventListener('message',({data:m})=>{
 
 const taskActions=create('div','task-actions');
 for(const [type,en,pt] of [['resume','Continue','Continuar'],['implementPlan','Implement plan','Implementar plano'],['reviewChanges','Review changes','Revisar alterações'],['undoChanges','Undo task changes','Desfazer alterações']]){
- const button=create('button','',window.VortexUI.language()==='pt'?pt:en);button.type='button';button.onclick=()=>request(type);button.dataset.taskAction=type;button.dataset.en=en;button.dataset.pt=pt;taskActions.append(button);
+ const button=create('button','',window.VortexUI.language()==='pt'?pt:en);button.type='button';button.onclick=()=>request(type);if(type==='resume')button.title=window.VortexUI.language()==='pt'?'Retoma o trabalho salvo; primeiro verifica o workspace.':'Resumes saved work after checking the workspace.';button.dataset.taskAction=type;button.dataset.en=en;button.dataset.pt=pt;taskActions.append(button);
 }
 $('timeline').after(taskActions);
 let availableTaskActions={};
@@ -239,3 +239,19 @@ const attachedContext=create('div','attached-context');document.querySelector('.
 const attachButton=create('button','', '@');attachButton.title='Add context';attachButton.setAttribute('aria-label','Add context');attachButton.onclick=()=>request('attachContext');document.querySelector('.composer-meta').prepend(attachButton);
 $('prompt').addEventListener('input',()=>{if($('prompt').value.endsWith('@'))request('attachContext');});
 window.addEventListener('message',({data:m})=>{if(m.type==='attachments'){attachedContext.replaceChildren();for(const item of m.items){const button=create('button','context-chip',item.label+' ×');button.title='Remove context: '+item.label;button.onclick=()=>request('removeContext',{id:item.id});attachedContext.append(button);}}});
+
+const progressTime=create('span','progress-time');progressTime.setAttribute('aria-hidden','true');runProgress.append(progressTime);
+setInterval(()=>{if(runTiming&&!runProgress.hidden)progressTime.textContent=Math.max(0,Math.floor((Date.now()-runTiming.phaseStartedAt)/1000))+' s';},1000);
+const jump=create('button','jump-latest','Go to latest');jump.hidden=true;$('timeline').after(jump);
+const updateJump=()=>{jump.hidden=$('timeline').scrollHeight-$('timeline').scrollTop-$('timeline').clientHeight<100;};$('timeline').addEventListener('scroll',updateJump);jump.onclick=()=>{$('timeline').scrollTop=$('timeline').scrollHeight;updateJump();};new MutationObserver(updateJump).observe($('timeline'),{childList:true,subtree:true});
+const recovery=create('div','recovery-actions');recovery.hidden=true;runProgress.after(recovery);
+window.addEventListener('message',({data:m})=>{
+ if(m.type==='history'&&!m.busy){recovery.hidden=true;runTiming=undefined;}
+ if(m.type==='runProgress'){runTiming=m.progress;progressTime.textContent='0 s';showProgress(true,m.progress.phase);}
+ if(m.type==='accepted'){runTiming=undefined;recovery.replaceChildren();recovery.hidden=true;}
+ if(m.type==='runFailure'){
+  recovery.replaceChildren();recovery.hidden=false;
+  const add=(label,type,data)=>{const b=create('button','',window.VortexUI.t(label));b.onclick=()=>{request(type,data||{});if(type==='retry')recovery.hidden=true;};recovery.append(b);};
+  if(m.retryable)add('Try again','retry');if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
+ }
+});

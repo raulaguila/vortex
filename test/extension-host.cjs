@@ -35,14 +35,16 @@ const root=path.resolve(__dirname,'..');
     async function findFrame(selector){for(let i=0;i<100;i++){for(const page of app.context().pages())for(const frame of page.frames())if(await frame.locator(selector).count())return frame;await new Promise(resolve=>setTimeout(resolve,100));}await window.screenshot({path:path.join(root,'test-results','host-failure.png')});throw new Error('Webview not found: '+selector);}
     let frame=await findFrame('#prompt');await frame.evaluate(()=>{window.testStates=[];window.addEventListener('message',e=>{if(e.data.type==='state')window.testStates.push(e.data.state);});});
     await frame.locator('#prompt').fill('Rascunho preservado');await frame.locator('#open-settings').click();const settings=await findFrame('#nav-providers');await settings.locator('#add-provider').click();
-    await settings.locator('#cancel-form').click();await settings.locator('#nav-conversation').click();await settings.locator('[name="modelTimeout"]').fill('600');await settings.locator('.execution-settings button[type="submit"]').click();
-    await frame.waitForFunction(()=>window.testStates.some(s=>s.preferences.execution?.modelTimeout===600));
+    await settings.locator('#cancel-form').click();await settings.locator('#nav-execution').click();await settings.locator('[name="firstResponseTimeout"]').fill('600');await settings.locator('.execution-settings button[type="submit"]').click();
+    await frame.waitForFunction(()=>window.testStates.some(s=>s.preferences.execution?.firstResponseTimeout===600));
     await settings.locator('#nav-providers').click();await settings.locator('#add-provider').click();
     await settings.locator('#provider-kind').selectOption('ollama');await settings.locator('#provider-name').fill('Ollama test');await settings.locator('#provider-url').fill(`http://127.0.0.1:${server.address().port}`);
     await settings.locator('#test-provider').click();await settings.locator('#form-notice').filter({hasText:'Connection tested'}).waitFor();await settings.locator('#save-provider').click();await settings.locator('.connection-status').filter({hasText:'1 models'}).waitFor();await settings.locator('#cancel-form').click();
     assert.equal(await frame.locator('#prompt').inputValue(),'Rascunho preservado');
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#selected-model').filter({hasText:'vortex-test-model'}).waitFor();
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Answer questions'}).click();await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();try{await frame.locator('.message-body').filter({hasText:'Conexão validada no Extension Host'}).waitFor();}catch(e){console.log('Vortex test state:',await frame.locator('body').innerText());console.log('Snapshot trace:',await frame.evaluate(()=>JSON.stringify({current:state,received:window.testStates})));throw e;}
+    await frame.waitForFunction(()=>!document.getElementById('stop')||document.getElementById('stop').hidden);await settings.locator('#nav-models').click();await settings.locator('#test-chat').click();await settings.locator('#chat-test-result').filter({hasText:'OK ·'}).waitFor();
+    await settings.locator('#nav-diagnostics').click();await settings.locator('#trace-location').filter({hasText:'last-flow.json'}).waitFor();const tracePath=await settings.locator('#trace-location').innerText();const flow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.ok(flow.turns.length);assert.ok(!flow.user_question.includes('Reply OK.'));await settings.locator('#open-trace').click();
     // Exercise the actual approval dialog and WorkspaceEdit with a disposable file.
     const approvalFile=path.join(temp,'workspace','approval.txt');await fs.writeFile(approvalFile,'original');
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Explore and implement'}).click();
@@ -149,7 +151,7 @@ const root=path.resolve(__dirname,'..');
     await window.locator('.monaco-workbench').waitFor();frame=await findFrame('#prompt');
     await frame.locator('.message-body').first().waitFor();
     assert.equal(await frame.locator('#prompt').inputValue(),'Draft survives window reload');
-    await frame.locator('#open-settings').click();const restoredSettings=await findFrame('#nav-conversation');await restoredSettings.locator('#nav-conversation').click();assert.equal(await restoredSettings.locator('[name="modelTimeout"]').inputValue(),'600');
+    await frame.locator('#open-settings').click();const restoredSettings=await findFrame('#nav-conversation');await restoredSettings.locator('#nav-execution').click();assert.equal(await restoredSettings.locator('[name="firstResponseTimeout"]').inputValue(),'600');
     await frame.waitForFunction(()=>document.getElementById('mode').value==='agent');
     assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
     await frame.locator('#new-task').click();await frame.locator('#welcome').waitFor();

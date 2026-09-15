@@ -4,18 +4,23 @@ import {Mode,Permission,isMode,isPermission} from './policy';
 export interface ModelRef { providerId: string; modelId: string }
 export type ChatMode = Mode;
 export interface ConversationPreferences { language: 'pt' | 'en' | 'es' | 'auto'; uiLanguage: 'en' | 'pt'; fontSize: number | null; sendKey: 'enter' | 'modifierEnter' }
-export interface ExecutionPreferences {maxSteps:number;modelTimeout:number;commandTimeout:number;taskTimeout:number;tokenBudget:number|null}
-export const defaultExecution=():ExecutionPreferences=>({maxSteps:20,modelTimeout:120,commandTimeout:60,taskTimeout:1800,tokenBudget:null});
-export interface Preferences { execution?:ExecutionPreferences; toolProtocols?: Record<string,'auto'|'native'|'compatibility'>; selected: ModelRef | null; favorites: ModelRef[]; manualModels: ModelRef[]; defaults: Record<ChatMode, ModelRef | null>; conversation: ConversationPreferences; context: Record<string, {source: 'api' | 'custom'; tokens: number}> }
+import {ExecutionPreferences,ModelTimeouts,validExecution,validTimeouts} from './execution';
+export {ExecutionPreferences,defaultExecution} from './execution';
+export type SettingsSection='providers'|'models'|'conversation'|'execution'|'diagnostics';
+export type ModelSettings=Pick<Preferences,'defaults'|'favorites'|'manualModels'|'context'|'toolProtocols'>;
+export interface Preferences { schemaVersion?:number; execution?:ExecutionPreferences; toolProtocols?: Record<string,'auto'|'native'|'compatibility'>; selected: ModelRef | null; favorites: ModelRef[]; manualModels: ModelRef[]; defaults: Record<ChatMode, ModelRef | null>; conversation: ConversationPreferences; context: Record<string, {source: 'api' | 'custom'; tokens: number}> }
 export const defaultConversation = (): ConversationPreferences => ({language: 'auto', uiLanguage: 'en', fontSize: null, sendKey: 'enter'});
-export interface ProviderInput { id?: string; name: string; kind: Kind; baseUrl: string; key: string; clearKey: boolean; tlsInsecure?: boolean }
+export interface ProviderInput { id?: string; name: string; kind: Kind; baseUrl: string; key: string; clearKey: boolean; tlsInsecure?: boolean; timeouts?:ModelTimeouts|null }
 export interface Catalog { status: 'idle' | 'loading' | 'ready' | 'error'; models: string[]; error?: string; requestId?: string }
 export interface Connection extends Provider { hasKey: boolean; catalog: Catalog }
 export interface ModelLimits { tools?: boolean; input: number | null; output: number | null; status: 'ready' | 'unknown'; error?: string }
 export interface ChecklistItem { id: string; text: string; status: 'pending' | 'running' | 'done' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
 export interface SettingsState {effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
-export interface AgentEvent { role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
+export interface ActivityData {runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied';output:string;startedAt:number;endedAt:number}
+export type RunPhase='preparing'|'context'|'waiting_model'|'receiving'|'compacting'|'approval'|'tool'|'summarizing'|'finishing'|'recovering';
+export interface RunProgress {runId:string;phase:RunPhase;startedAt:number;phaseStartedAt:number;tool?:{id:string;name:string;path?:string}}
+export interface AgentEvent { failureCode?:string; activity?:ActivityData; incomplete?:boolean; role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
 export type Request = (
   | { type: 'ready'; legacySelection?: ModelRef }
   | { type: 'saveProvider' | 'testProvider'; provider: ProviderInput }
@@ -24,7 +29,7 @@ export type Request = (
   | { type: 'favoriteModel'; model: ModelRef; favorite: boolean }
   | { type: 'manualModel'; model: ModelRef; remove: boolean }
   | { type: 'start'; prompt: string; model: ModelRef; mode: Mode; permission: Permission }
-  | { type: 'openSettings'; section?: 'providers' | 'models' | 'conversation' }
+  | { type: 'openSettings'; section?: SettingsSection }
   | { type: 'setDefaultModel'; mode: ChatMode; model: ModelRef | null }
   | { type: 'applyMode'; mode: ChatMode }
   | { type: 'setConversation'; patch: Partial<ConversationPreferences> }
@@ -32,6 +37,9 @@ export type Request = (
   | { type: 'refreshAllModels' }
   | { type: 'modelInfo'; model: ModelRef }
   | {type:'setExecution';execution:ExecutionPreferences}
+  | {type:'saveModels';settings:ModelSettings}
+  | {type:'testChat';model:ModelRef}
+  | {type:'cancelTestChat'|'traceInfo'|'openTrace'|'exportTrace'|'clearTrace'|'retry'}
   | {type:'attachContext'|'setupSandbox'}
   | {type:'removeContext';id:string}
   | {type:'resume'|'implementPlan'|'reviewChanges'|'undoChanges'}
@@ -44,11 +52,15 @@ export type Request = (
   | { type: 'stop' }
 ) & { requestId: string };
 export type Response =
+  | {type:'runProgress';progress:RunProgress}
+  | {type:'runFailure';code:string;message:string;retryable:boolean}
+  | {type:'traceInfo';path:string;bytes:number;exists:boolean}
+  | {type:'chatTestResult';requestId:string;ok:boolean;elapsed:number;message:string;protocol:string}
   | {type:'usage';model:ModelRef;input:number;output:number}
   | {type:'attachments';items:{id:string;label:string;path?:string}[]}
-  | {type:'stream';id:string;text:string;done:boolean}
+  | {type:'stream';id:string;text:string;done:boolean;incomplete?:boolean}
   | {type:'taskState';resume:boolean;implementPlan:boolean;reviewChanges:boolean;undoChanges:boolean}
-  | {type:'toolProgress';id:string;name:string;status:string;elapsed?:number}
+  | {type:'toolProgress';runId?:string;id:string;name:string;status:string;elapsed?:number}
   | { type: 'state'; state: SettingsState; busy: boolean }
   | { type: 'result'; requestId: string; ok: boolean; message?: string; providerId?: string }
   | { type: 'history'; events: AgentEvent[]; busy: boolean; status: string }
@@ -58,7 +70,7 @@ export type Response =
   | { type: 'sessions'; sessions: SessionSummary[]; requestId: string;offset?:number;hasMore?:boolean }
   | { type: 'sessionLoaded'; mode: Mode; permission: Permission; model: ModelRef }
 
-  | { type: 'settingsSection'; section: 'providers' | 'models' | 'conversation' }
+  | { type: 'settingsSection'; section: SettingsSection }
   | { type: 'accepted'; requestId: string }
   | { type: 'runEnd'; requestId: string; status: 'complete' | 'error' | 'stopped' }
   | { type: 'status'; busy: boolean; text: string };
@@ -72,7 +84,7 @@ function isProvider(v: unknown): v is ProviderInput {
   return record(v) && (v.id === undefined || string(v.id)) && string(v.name, 80)
     && typeof v.kind === 'string' && Object.hasOwn(defaults, v.kind)
     && string(v.baseUrl, 2048) && typeof v.key === 'string' && v.key.length <= 8192 && typeof v.clearKey === 'boolean'
-    && (v.tlsInsecure === undefined || typeof v.tlsInsecure === 'boolean');
+    && (v.tlsInsecure === undefined || typeof v.tlsInsecure === 'boolean') && (v.timeouts==null||validTimeouts(v.timeouts));
 }
 export function parseRequest(v: unknown): Request {
   if (!record(v) || !string(v.requestId, 100)) throw new Error('Mensagem inválida.');
@@ -85,7 +97,7 @@ export function parseRequest(v: unknown): Request {
     case 'favoriteModel': valid = isModelRef(v.model) && typeof v.favorite === 'boolean'; break;
     case 'manualModel': valid = isModelRef(v.model) && typeof v.remove === 'boolean'; break;
     case 'start': valid = string(v.prompt, 100000) && isModelRef(v.model) && isMode(v.mode) && isPermission(v.permission); break;
-    case 'openSettings': valid = v.section === undefined || ['providers','models','conversation'].includes(String(v.section)); break;
+    case 'openSettings': valid = v.section === undefined || ['providers','models','conversation','execution','diagnostics'].includes(String(v.section)); break;
     case 'setDefaultModel': valid = ['ask','plan','agent'].includes(String(v.mode)) && (v.model === null || isModelRef(v.model)); break;
     case 'clear': case 'applyMode': valid = ['ask','plan','agent'].includes(String(v.mode)); break;
     case 'setConversation': valid = isConversationPatch(v.patch); break;
@@ -94,7 +106,10 @@ export function parseRequest(v: unknown): Request {
     case 'attachContext':case 'setupSandbox':valid=true;break;
     case 'removeContext':valid=string(v.id);break;
     case 'resume':case 'implementPlan':case 'reviewChanges':case 'undoChanges':valid=true;break;
-    case 'setExecution': {const e=v.execution;valid=record(e)&&Number.isInteger(e.modelTimeout)&&Number(e.modelTimeout)>=1&&Number(e.modelTimeout)<=3600&&Number.isInteger(e.maxSteps)&&Number(e.maxSteps)>=1&&Number(e.maxSteps)<=200&&Number.isInteger(e.commandTimeout)&&Number(e.commandTimeout)>=1&&Number(e.commandTimeout)<=3600&&Number.isInteger(e.taskTimeout)&&Number(e.taskTimeout)>=1&&Number(e.taskTimeout)<=86400&&(e.tokenBudget===null||Number.isSafeInteger(e.tokenBudget)&&Number(e.tokenBudget)>=1024);break;}
+    case 'setExecution': valid=validExecution(v.execution);break;
+    case 'saveModels': valid=isModelSettings(v.settings);break;
+    case 'testChat': valid=isModelRef(v.model);break;
+    case 'cancelTestChat':case 'traceInfo':case 'openTrace':case 'exportTrace':case 'clearTrace':case 'retry':valid=true;break;
     case 'setToolProtocol': valid=isModelRef(v.model)&&['auto','native','compatibility'].includes(String(v.protocol));break;
     case 'modelInfo': valid = isModelRef(v.model); break;
     case 'setContext': valid = isModelRef(v.model) && ['api','custom'].includes(String(v.source)) && typeof v.tokens === 'number' && Number.isInteger(v.tokens) && v.tokens >= 1024 && v.tokens <= 10000000; break;
@@ -113,4 +128,9 @@ export function isConversationPatch(v: unknown): v is Partial<ConversationPrefer
     && (!Object.hasOwn(v,'language') || ['pt','en','es','auto'].includes(String(v.language)))
     && (!Object.hasOwn(v,'sendKey') || ['enter','modifierEnter'].includes(String(v.sendKey)))
     && (!Object.hasOwn(v,'fontSize') || v.fontSize === null || typeof v.fontSize === 'number' && Number.isInteger(v.fontSize) && v.fontSize >= 11 && v.fontSize <= 20);
+}
+
+export function isModelSettings(v:any):v is ModelSettings {
+ const refKey=(key:string)=>{try{const a=JSON.parse(key);return Array.isArray(a)&&a.length===2&&a.every(x=>typeof x==='string'&&x.length>0&&x.length<=500);}catch{return false;}};
+ return record(v)&&record(v.defaults)&&['ask','plan','agent'].every(k=>(v.defaults as any)[k]===null||isModelRef((v.defaults as any)[k]))&&Array.isArray(v.favorites)&&v.favorites.every(isModelRef)&&Array.isArray(v.manualModels)&&v.manualModels.every(isModelRef)&&record(v.context)&&Object.entries(v.context).every(([k,c]:any)=>refKey(k)&&record(c)&&['api','custom'].includes(String(c.source))&&Number.isSafeInteger(c.tokens)&&Number(c.tokens)>=1024&&Number(c.tokens)<=10000000)&&(v.toolProtocols===undefined||record(v.toolProtocols)&&Object.entries(v.toolProtocols).every(([k,p])=>refKey(k)&&['auto','native','compatibility'].includes(p as string)));
 }

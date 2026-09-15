@@ -1,6 +1,7 @@
+import {migrateExecution} from './execution';
 import {randomUUID} from 'node:crypto';
 import {Client, Provider, validateUrl} from './providers';
-import {Catalog, ModelRef, Preferences, ProviderInput, SettingsState, sameModel, ChatMode, ConversationPreferences, defaultConversation, ModelLimits,ExecutionPreferences,defaultExecution} from './protocol';
+import {Catalog, ModelRef, Preferences, ProviderInput, SettingsState, ModelSettings, sameModel, ChatMode, ConversationPreferences, defaultConversation, ModelLimits,ExecutionPreferences,defaultExecution} from './protocol';
 
 export interface Store { get<T>(key: string, fallback: T): T; update(key: string, value: unknown): Thenable<void> | Promise<void> }
 export interface Secrets { get(key: string): Thenable<string | undefined> | Promise<string | undefined>; store(key: string, value: string): Thenable<void> | Promise<void>; delete(key: string): Thenable<void> | Promise<void> }
@@ -19,12 +20,13 @@ export class ProviderManager {
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.queue.then(operation); this.queue = pending.catch(() => undefined); return pending;
   }
-  providers(): Provider[] { if(!this.providersCache)this.providersCache=this.storage.get<Provider[]>('providers', []);return structuredClone(this.providersCache); }
+  async initialize(){if(this.storage.get<any>('modelPreferences',{}).schemaVersion!==3)await this.serial(()=>this.persistPreferences(this.preferences()));}
+  providers(): Provider[] { if(!this.providersCache)this.providersCache=this.storage.get<Provider[]>('providers', []).map(p=>({...p,timeouts:p.timeouts&&Number.isInteger(p.timeouts.firstResponseTimeout)&&Number.isInteger(p.timeouts.idleTimeout)&&p.timeouts.firstResponseTimeout>=1&&p.timeouts.firstResponseTimeout<=3600&&p.timeouts.idleTimeout>=1&&p.timeouts.idleTimeout<=3600?p.timeouts:null}));return structuredClone(this.providersCache); }
   preferences(): Preferences {
     if(this.prefsCache) return structuredClone(this.prefsCache);
     const fallback = emptyPreferences();
     const stored = this.storage.get<Partial<Preferences>>('modelPreferences', {});
-    this.prefsCache={...fallback, ...stored, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation},execution:{...defaultExecution(),...stored.execution,modelTimeout:Number.isInteger(stored.execution?.modelTimeout)&&Number(stored.execution?.modelTimeout)>=1&&Number(stored.execution?.modelTimeout)<=3600?stored.execution!.modelTimeout:120}};
+    this.prefsCache={...fallback, ...stored, schemaVersion:3, defaults: {...fallback.defaults, ...stored.defaults}, conversation: {...fallback.conversation, ...stored.conversation},execution:migrateExecution(stored.execution)};
     return structuredClone(this.prefsCache);
   }
   private async persistPreferences(value: Preferences): Promise<void> {
@@ -37,6 +39,16 @@ export class ProviderManager {
   async applyMode(mode: ChatMode): Promise<void> {
     return this.serial(async () => { const prefs = this.preferences(); const model = prefs.defaults[mode]; if(model && this.providers().some(p => p.id === model.providerId)) await this.persistPreferences( {...prefs, selected: model}); });
   }
+  async saveModels(settings:ModelSettings){await this.serial(async()=>{
+    const prior=this.preferences();
+    for(const ref of [...settings.favorites,...settings.manualModels,...Object.values(settings.defaults).filter((r):r is ModelRef=>!!r)])this.find(ref.providerId);
+    for(const [key,value]of Object.entries(settings.context)){const [id]=JSON.parse(key);this.find(id);const limit=this.limits.get(key)?.input;if(JSON.stringify(prior.context[key])===JSON.stringify(value))continue;if(value.source==='api'&&!limit)throw new Error('Discover the API limit first.');if(limit&&value.tokens>limit)throw new Error('Context exceeds the API limit.');}
+    for(const key of Object.keys(settings.toolProtocols||{}))this.find(JSON.parse(key)[0]);
+    const removed=prior.manualModels.filter(m=>!settings.manualModels.some(r=>sameModel(m,r))&&!this.catalogs.get(m.providerId)?.models.includes(m.modelId));
+    const gone=(m:ModelRef|null)=>m&&removed.some(r=>sameModel(m,r));
+    await this.persistPreferences({...prior,...settings,selected:gone(prior.selected)?null:prior.selected,favorites:settings.favorites.filter(m=>!gone(m)),defaults:Object.fromEntries(Object.entries(settings.defaults).map(([k,m])=>[k,gone(m)?null:m])) as Preferences['defaults']});
+    for(const key of new Set([...Object.keys(prior.toolProtocols||{}),...Object.keys(settings.toolProtocols||{})]))if(prior.toolProtocols?.[key]!==settings.toolProtocols?.[key])this.unsupportedTools.delete(key);
+  });}
   async setExecution(execution:ExecutionPreferences){await this.serial(async()=>{await this.persistPreferences({...this.preferences(),execution});});}
   async setConversation(patch: Partial<ConversationPreferences>): Promise<void> {
     return this.serial(async () => { const prefs = this.preferences(); await this.persistPreferences( {...prefs, conversation: {...prefs.conversation, ...patch}}); });
@@ -91,7 +103,7 @@ export class ProviderManager {
   async setToolProtocol(model:ModelRef,protocol:'auto'|'native'|'compatibility') {
     await this.serial(async()=>{this.find(model.providerId);this.unsupportedTools.delete(JSON.stringify([model.providerId,model.modelId]));const p=this.preferences();await this.persistPreferences({...p,toolProtocols:{...p.toolProtocols,[JSON.stringify([model.providerId,model.modelId])]:protocol}});});
   }
-  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport,this.log,this.preferences().execution?.modelTimeout??120); }
+  async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport,this.log,{...this.preferences().execution!,...p.timeouts}); }
   private async resolve(input: ProviderInput): Promise<{provider: Provider; key: string}> {
     const existing = input.id ? this.find(input.id) : undefined;
     if (input.clearKey && !['ollama','compatible'].includes(input.kind)) throw new Error('Este provedor exige uma API key.');
@@ -100,7 +112,7 @@ export class ProviderManager {
     if (existing && existing.kind !== input.kind && !input.key.trim() && saved && !input.clearKey) throw new Error('Ao mudar o tipo, informe uma nova chave ou remova a chave anterior.');
     const key = input.clearKey ? '' : input.key.trim() || saved;
     if (!key && !['ollama','compatible'].includes(input.kind)) throw new Error('Este provedor exige uma API key.');
-    return {provider: {id: existing?.id || randomUUID(), name: input.name.trim(), kind: input.kind, baseUrl: validateUrl(input.baseUrl.trim()), tlsInsecure: input.kind === 'compatible' && (input.tlsInsecure ?? existing?.tlsInsecure ?? false)}, key};
+    return {provider: {id: existing?.id || randomUUID(), name: input.name.trim(), kind: input.kind, baseUrl: validateUrl(input.baseUrl.trim()), timeouts: input.timeouts===undefined?existing?.timeouts:input.timeouts, tlsInsecure: input.kind === 'compatible' && (input.tlsInsecure ?? existing?.tlsInsecure ?? false)}, key};
   }
   async save(input: ProviderInput): Promise<string> {
     return this.serial(async () => {

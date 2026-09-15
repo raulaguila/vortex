@@ -12,7 +12,7 @@ test('last flow uses reference envelope, records rounds and redacts credential',
  client.attachTrace(trace);await client.turn('m','system',[{role:'user',content:'hello'}],new AbortController().signal,{tokens:5000,output:500},[]);
  await trace.finish('complete',[{role:'assistant',content:'private-key'}]);
  const raw=await fs.readFile(file,'utf8'),j=JSON.parse(raw);assert.ok(!raw.includes('private-key'));assert.deepEqual(Object.keys(j),['conversation_id','model','temperature','max_tokens','system_prompt','user_question','turns','final_answer','sources']);assert.equal(j.turns[0].request.Messages[0].content,'system');assert.equal(j.turns[0].response.stop_reason,'stop');assert.equal(j.final_answer,'[REDACTED]');assert.equal(j.temperature,null);
- const next=new RunTrace(file,{sessionId:'next',model:{modelId:'m'},prompt:'next'});await next.save();assert.equal(JSON.parse(await fs.readFile(file,'utf8')).turns.length,0);
+ const next=new RunTrace(file,{sessionId:'next',model:{modelId:'m'},prompt:'next'});await next.save();await next.flush();assert.equal(JSON.parse(await fs.readFile(file,'utf8')).turns.length,0);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('trace preserves tool IDs, result sources and failed requests',async()=>{

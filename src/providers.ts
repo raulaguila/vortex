@@ -1,3 +1,4 @@
+import {ModelTimeouts,ResponseDeadline,ExecutionError} from './execution';
 import {RunTrace} from './trace';
 import {compatibilityAnswer,responseMetadata} from './chatResponse';
 import {randomUUID} from 'node:crypto';
@@ -8,7 +9,7 @@ import {nativePayload,decodeNative,Turn,ToolCall,ToolResult,ToolsUnsupported} fr
 import {readStream} from './stream';
 import type {ToolDefinition} from './actions';
 export type Kind = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'compatible';
-export interface Provider { id: string; name: string; kind: Kind; baseUrl: string; tlsInsecure?: boolean }
+export interface Provider { id: string; name: string; kind: Kind; baseUrl: string; tlsInsecure?: boolean; timeouts?:ModelTimeouts|null }
 export interface Message { role: 'user' | 'assistant'; content: string; toolCalls?:ToolCall[]; toolResult?:ToolResult; continuation?:unknown; continuationKind?:Kind }
 export const defaults: Record<Kind, string> = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',gemini:'https://generativelanguage.googleapis.com/v1beta',ollama:'http://localhost:11434',compatible:''};
 export function validateUrl(value: string): string {
@@ -17,52 +18,56 @@ export function validateUrl(value: string): string {
   return u.toString().replace(/\/$/, '');
 }
 export class Client {
-  constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void, private modelTimeout=120) {}
+  constructor(private p: Provider, private key: string, private transport?: typeof fetch, private log?: (record:Record<string,unknown>)=>void, private modelTimeout:number|ModelTimeouts=120) {}
   private trace?:RunTrace;
   attachTrace(trace:RunTrace){this.trace=trace;trace.addSecret(this.key);}
-  private async request(path:string,body?:unknown,signal?:AbortSignal,consume?:(response:Response)=>Promise<unknown>):Promise<any>{
+  private async request(path:string,body?:unknown,signal?:AbortSignal,consume?:(response:Response,signal:AbortSignal,progress:()=>void)=>Promise<unknown>):Promise<any>{
     const generation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path);
     const trace=generation?this.trace:undefined;
     const index=trace?await trace.request(path,body):undefined;
     try{const result=await this.requestImpl(path,body,signal,consume);if(trace)await trace.response(index!,result,undefined,this.p.kind);return result;}
     catch(error){if(trace)await trace.response(index!,undefined,error instanceof Error?error.message:String(error));throw error;}
   }
-  private async requestImpl(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
-    const headers: Record<string,string> = {'Content-Type':'application/json'};
-    if(this.p.kind==='anthropic') { headers['x-api-key']=this.key; headers['anthropic-version']='2023-06-01'; }
-    else if(this.p.kind==='gemini') headers['x-goog-api-key']=this.key;
-    else if(this.key) headers.Authorization=`Bearer ${this.key}`;
-    const requestId=randomUUID(),started=Date.now();const operation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path)?'generation':'metadata';
-    this.log?.({event:'providerRequest',requestId,kind:this.p.kind,operation,attempt});
-    const timeoutMs=operation==='generation'?this.modelTimeout*1000:signal?120000:30000;
-    const timeoutSignal=AbortSignal.timeout(timeoutMs),requestSignal=signal?AbortSignal.any([signal,timeoutSignal]):timeoutSignal;
-    const timeoutError=()=>new Error(operation==='generation'?`${this.p.name}: tempo de resposta do modelo esgotado (${this.modelTimeout}s). Ajuste em Configurações → Conversa → Limites de execução.`:`${this.p.name}: tempo de conexão esgotado. Tente novamente.`);
-    let response: Response;
-    try {
-      const options: RequestInit = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:requestSignal,redirect:'manual'};
+  private async requestImpl(path:string,body?:unknown,signal?:AbortSignal,consume?:(response:Response,signal:AbortSignal,progress:()=>void)=>Promise<unknown>,attempt=0):Promise<any>{
+    const headers:Record<string,string>={'Content-Type':'application/json'};
+    if(this.p.kind==='anthropic'){headers['x-api-key']=this.key;headers['anthropic-version']='2023-06-01';}
+    else if(this.p.kind==='gemini')headers['x-goog-api-key']=this.key;
+    else if(this.key)headers.Authorization=`Bearer ${this.key}`;
+    const requestId=randomUUID(),started=Date.now(),generation=/\/(?:api\/chat|chat\/completions|messages)$|:(?:streamGenerateContent|generateContent)/.test(path);
+    const limits=typeof this.modelTimeout==='number'?{firstResponseTimeout:this.modelTimeout,idleTimeout:this.modelTimeout}:this.modelTimeout;
+    const deadline=new ResponseDeadline(generation?limits:{firstResponseTimeout:30,idleTimeout:30});
+    const requestSignal=signal?AbortSignal.any([signal,deadline.controller.signal]):deadline.controller.signal;
+    this.log?.({event:'providerRequest',requestId,kind:this.p.kind,operation:generation?'generation':'metadata',attempt});
+    try{
+      requestSignal.throwIfAborted();const options:RequestInit={method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:requestSignal,redirect:'manual'};
       const url=`${validateUrl(this.p.baseUrl)}${path}`;
-      response = await (this.transport?this.transport(url,options):this.p.kind==='compatible'?compatibleRequest(url,options,!!this.p.tlsInsecure):fetch(url,options));
-    } catch (error) {
-      this.log?.({event:'providerTransportError',requestId,elapsed:Date.now()-started,cancelled:!!signal?.aborted});
-      if(signal?.aborted) throw error;
-      if(timeoutSignal.aborted||error instanceof Error && error.name === 'TimeoutError') throw timeoutError();
-      throw new Error(`${this.p.name}: conexão indisponível. ${connectionError(error)}`);
-    }
-    this.log?.({event:'providerResponse',requestId,httpStatus:response.status,elapsed:Date.now()-started});
-    if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await delay(250*(2**attempt),undefined,{signal});return this.requestImpl(path,body,signal,consume,attempt+1);}
-    if(!response.ok) {
-      if([400,422].includes(response.status)&&body&&typeof body==='object'&&'tools' in body){
-        const text=(await response.text()).slice(0,16384);if(/(?:does not support|unsupported|not supported)[^\n]{0,80}(?:tools|function.call)|(?:tools|function.call)[^\n]{0,80}(?:not supported|unsupported)/i.test(text))throw new ToolsUnsupported();
+      const response=await (this.transport?this.transport(url,options):this.p.kind==='compatible'?compatibleRequest(url,options,!!this.p.tlsInsecure):fetch(url,options));
+      this.log?.({event:'providerResponse',requestId,httpStatus:response.status,elapsed:Date.now()-started});
+      if([429,502,503,504].includes(response.status)&&attempt<2){
+        const retry=response.headers.get('retry-after');const ms=retry?(Number.isFinite(Number(retry))?Math.max(0,Number(retry)*1000):Math.max(0,Date.parse(retry)-Date.now())):250*2**attempt;
+        await response.body?.cancel();await delay(Number.isFinite(ms)?Math.min(ms,86400000):250,undefined,{signal:requestSignal});deadline.dispose();return await this.requestImpl(path,body,signal,consume,attempt+1);
       }
-      const detail = response.status>=300&&response.status<400 ? 'A API redirecionou a requisição. Configure a URL base final do serviço.' : [401,403].includes(response.status) ? 'Falha de autenticação. Verifique a chave e as permissões.'
-        : response.status === 429 ? 'Limite de uso atingido. Tente novamente mais tarde.'
-        : response.status === 404 ? 'Endpoint ou modelo não encontrado. Verifique a URL e o ID.'
-        : 'Provedor indisponível. Tente novamente.';
-      await response.body?.cancel().catch(()=>undefined);throw new Error(`${this.p.name}: HTTP ${response.status}. ${detail}`);
-    }
-    try { const result=consume?await consume(response):await response.json();if(operation==='generation')this.log?.({event:'providerResponseShape',requestId,elapsed:Date.now()-started,...responseMetadata(this.p.kind,result)});return result; }
-    catch { signal?.throwIfAborted();if(timeoutSignal.aborted)throw timeoutError();throw new Error(`${this.p.name}: resposta inválida da API. Verifique a URL base.`); }
+      if(!response.ok){
+        if([400,422].includes(response.status)&&body&&typeof body==='object'&&'tools' in body){const text=(await response.text()).slice(0,16384);if(/(?:does not support|unsupported|not supported)[^\n]{0,80}(?:tools|function.call)|(?:tools|function.call)[^\n]{0,80}(?:not supported|unsupported)/i.test(text))throw new ToolsUnsupported();}
+        await response.body?.cancel().catch(()=>undefined);
+        const detail=response.status>=300&&response.status<400?'A API redirecionou a requisição. Configure a URL base final do serviço.':[401,403].includes(response.status)?'Falha de autenticação. Verifique a chave e as permissões.':response.status===404?'Endpoint ou modelo não encontrado. Verifique a URL e o ID.':'Provedor indisponível. Tente novamente.';
+        throw new ExecutionError([401,403].includes(response.status)?'authentication':'provider',`${this.p.name}: HTTP ${response.status}. ${detail}`,[429,502,503,504].includes(response.status));
+      }
+      let result:any;
+      try{result=consume?await consume(response,requestSignal,()=>{deadline.progress();this.onProgress?.();}):await response.json();}
+      catch(error){requestSignal.throwIfAborted();throw new ExecutionError('invalid_response',`${this.p.name}: resposta inválida da API. Verifique a URL base.`);}
+      requestSignal.throwIfAborted();
+      if(generation)this.log?.({event:'providerResponseShape',requestId,elapsed:Date.now()-started,...responseMetadata(this.p.kind,result)});
+      return result;
+    }catch(error){
+      if(signal?.aborted)throw signal.reason;
+      if(deadline.controller.signal.aborted)throw deadline.controller.signal.reason;
+      if(error instanceof ExecutionError||error instanceof ToolsUnsupported)throw error;
+      this.log?.({event:'providerTransportError',requestId,elapsed:Date.now()-started});
+      throw new ExecutionError('transport',`${this.p.name}: conexão indisponível. ${connectionError(error)}`,true);
+    }finally{deadline.dispose();}
   }
+  onProgress?:()=>void;
   async models(): Promise<string[]> {
     const all:string[]=[];
     let cursor='';
@@ -94,24 +99,27 @@ export class Client {
     return {input,output,status:input?'ready':'unknown',...(Array.isArray(raw.capabilities)?{tools:raw.capabilities.includes('tools')}:{})};
   }
   async turn(model:string,system:string,messages:Message[],signal:AbortSignal,budget:{tokens:number;output:number},tools:ToolDefinition[],onText?:(text:string)=>void):Promise<Turn>{
+    this.trace?.prepare(system,messages);
     const request=nativePayload(this.p.kind,model,system,messages,tools,budget);
     if(onText){
       if(this.p.kind==='gemini')request.path=request.path.replace(':generateContent',':streamGenerateContent?alt=sse');
       else Object.assign(request.body,{stream:true});
     }
-    return decodeNative(this.p.kind,await this.request(request.path,request.body,signal,onText?response=>{
+    return decodeNative(this.p.kind,await this.request(request.path,request.body,signal,onText?(response,requestSignal,progress)=>{
       if(response.headers.get('content-type')?.includes('application/json'))return response.json();
-      return readStream(response,this.p.kind,signal,onText);
+      return readStream(response,this.p.kind,requestSignal,onText,progress);
     }:undefined));
   }
   async chat(model:string, system:string, messages:Message[], signal:AbortSignal, budget?: {tokens:number;output:number}):Promise<string> {
-    // Compatibility endpoints only receive their supported role/content fields.
-    messages=messages.map(m=>({role:m.role,content:[m.content,...(m.toolCalls||[]).map(call=>`Tool call ${call.name}: ${JSON.stringify(call.arguments)}`),...(m.toolResult?[`Tool result ${m.toolResult.name} (${m.toolResult.status}): ${m.toolResult.output}`]:[])].filter(Boolean).join('\n')}));
-    let result:any;
-    if(this.p.kind==='anthropic') {result=await this.request('/messages',{model,system,max_tokens:budget?.output||4096,messages},signal);return compatibilityAnswer(this.p.kind,result);}
-    if(this.p.kind==='gemini') {result=await this.request(`/models/${encodeURIComponent(model)}:generateContent`,{generationConfig:{maxOutputTokens:budget?.output||4096},systemInstruction:{parts:[{text:system}]},contents:messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))},signal);return compatibilityAnswer(this.p.kind,result);}
-    const payload={model,...(this.p.kind==='ollama'?{options:{num_ctx:budget?.tokens||16384,num_predict:budget?.output||4096}}:this.p.kind==='compatible'?{max_tokens:budget?.output||4096}:{max_completion_tokens:budget?.output||4096}),messages:[{role:'system',content:system},...messages],stream:false};
-    result=await this.request(this.p.kind==='ollama'?'/api/chat':'/chat/completions',payload,signal);
-    return compatibilityAnswer(this.p.kind,result);
+    const request=compatibilityPayload(this.p.kind,model,system,messages,budget);
+    return compatibilityAnswer(this.p.kind,await this.request(request.path,request.body,signal));
   }
+
+}
+
+export function compatibilityPayload(kind:Kind,model:string,system:string,messages:Message[],budget={tokens:16384,output:4096}){
+ const rows=messages.map(m=>({role:m.role,content:m.toolResult?`Tool result ${m.toolResult.name} [${m.toolResult.id}] (${m.toolResult.status}): ${m.toolResult.output}`:[m.content,...(m.toolCalls||[]).map(call=>`Tool call ${call.name} [${call.id}]: ${JSON.stringify(call.arguments)}`)].filter(Boolean).join('\n')}));
+ if(kind==='anthropic')return {path:'/messages',body:{model,system,max_tokens:budget.output,messages:rows}};
+ if(kind==='gemini')return {path:`/models/${encodeURIComponent(model)}:generateContent`,body:{generationConfig:{maxOutputTokens:budget.output},systemInstruction:{parts:[{text:system}]},contents:rows.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))}};
+ return {path:kind==='ollama'?'/api/chat':'/chat/completions',body:{model,...(kind==='ollama'?{options:{num_ctx:budget.tokens,num_predict:budget.output}}:kind==='compatible'?{max_tokens:budget.output}:{max_completion_tokens:budget.output}),messages:[{role:'system',content:system},...rows],stream:false}};
 }

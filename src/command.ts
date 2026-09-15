@@ -1,3 +1,4 @@
+import {ExecutionError} from './execution';
 import {spawn,execFile} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 
@@ -15,7 +16,7 @@ export function runCommand(command:string,cwd:string,signal:AbortSignal,timeout=
     };
     const stop=(error:Error)=>{if(finished)return;reason=error;terminate();};
     const aborted=()=>stop(new Error('Command cancelled.'));
-    const timer=setTimeout(()=>stop(new Error('Command timed out.')),timeout);
+    const timer=setTimeout(()=>stop(new ExecutionError('command_timeout','Command timed out.')),timeout);
     signal.addEventListener('abort',aborted,{once:true});
     const cleanup=()=>{finished=true;clearTimeout(timer);signal.removeEventListener('abort',aborted);};
     const collect=(stream:'stdout'|'stderr',chunk:Buffer)=>{

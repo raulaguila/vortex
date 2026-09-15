@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import {randomBytes} from 'node:crypto';
+import {RunTrace} from './trace';
+import {stat,readFile,unlink} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {EditorContext} from './editorContext';
 import {AgentController} from './agent';
 import {ProviderManager} from './providerManager';
-import {parseRequest, Request, Response} from './protocol';
+import {parseRequest, Request, Response,SettingsSection} from './protocol';
 import {execFile} from 'node:child_process';
 import {Sandbox} from './sandbox';
 import {Attachments} from './attachments';
@@ -32,7 +34,8 @@ class VortexController implements vscode.WebviewViewProvider {
   private initialized = false;
   private restored?:Promise<void>;
   private routes = new Map<string, Surface>();
-  private settingsSection: 'providers' | 'models' | 'conversation' = 'providers';
+  private chatTest?:AbortController;
+  private settingsSection: SettingsSection = 'providers';
   constructor(private ctx: vscode.ExtensionContext) {
     this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
     const traceUri=vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json');
@@ -53,7 +56,7 @@ class VortexController implements vscode.WebviewViewProvider {
     const editor=new EditorContext();ctx.subscriptions.push(editor);
     this.providers = new ProviderManager(ctx.globalState, ctx.secrets,undefined,log);
     this.agent = new AgentController(this.providers, message => {
-      if(message.type==='toolProgress')log({id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
+      if(message.type==='toolProgress')log({runId:message.runId,id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
       if(message.type==='runEnd')log({id:message.requestId,status:message.status});
       if(message.type==='context')void this.state().catch(()=>undefined);
       if(message.type==='accepted'){this.attachments.consume();this.attachmentState();}
@@ -63,8 +66,10 @@ class VortexController implements vscode.WebviewViewProvider {
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
     }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor,traceUri.fsPath);
   }
+  private traceUri(){return vscode.Uri.joinPath(this.ctx.storageUri||this.ctx.globalStorageUri,'last-flow.json');}
+  private async traceInfo(target:Surface){const uri=this.traceUri();const info=await stat(uri.fsPath).catch(()=>undefined);this.post(target,{type:'traceInfo',path:uri.fsPath,exists:!!info,bytes:info?.size||0});}
   private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
-  dispose() { this.agent.dispose(); this.panel?.dispose(); }
+  dispose() { this.chatTest?.abort();this.agent.dispose(); this.panel?.dispose(); }
   private post(target: Surface, data: Response) { if(!target.disposed) void target.webview.postMessage(data); }
   private async state() {
     const version = ++this.snapshotVersion;
@@ -74,7 +79,7 @@ class VortexController implements vscode.WebviewViewProvider {
   resolveWebviewView(view: vscode.WebviewView) {
     this.bind(view.webview, 'chat', listener => view.onDidDispose(listener));
   }
-  openSettings(section: 'providers' | 'models' | 'conversation' = 'providers') {
+  openSettings(section: SettingsSection = 'providers') {
     this.settingsSection = section;
     if(this.panel) {
       this.panel.reveal();
@@ -101,7 +106,7 @@ class VortexController implements vscode.WebviewViewProvider {
       try { await this.handle(target,msg); }
       catch(error) { this.post(target,{type:'result',requestId:msg.requestId,ok:false,message:error instanceof Error ? error.message : 'Não foi possível concluir a operação.'}); }
     });
-    onDispose(() => { target.disposed=true; listener.dispose(); this.surfaces.delete(target); });
+    onDispose(() => { if(target.kind==='settings')this.chatTest?.abort();target.disposed=true; listener.dispose(); this.surfaces.delete(target); });
     return target;
   }
   private async handle(target: Surface, msg: Request): Promise<void> {
@@ -112,7 +117,7 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'removeContext':this.attachments.remove(msg.id);this.attachmentState();success();return;
       case 'ready':
         this.attachmentState();
-        await this.providers.migrateSelection(msg.legacySelection); await this.state();
+        await this.providers.migrateSelection(msg.legacySelection);await this.providers.initialize(); await this.state();
         if(!this.restored)this.restored=(async()=>{
           const id=this.ctx.workspaceState.get<string>('activeSession');
           if(id&&!this.agent.busy)try{await this.agent.load(id);}catch{await this.ctx.workspaceState.update('activeSession',undefined);}
@@ -135,6 +140,21 @@ class VortexController implements vscode.WebviewViewProvider {
         try{await this.agent.resume(msg.requestId,msg.type==='implementPlan');}finally{this.routes.delete(msg.requestId);}success();return;
       case 'reviewChanges':await this.agent.reviewChanges();success();return;
       case 'undoChanges':await this.agent.undoChanges();success();return;
+      case 'retry':if(target.kind!=='chat')throw new Error('Use the conversation.');this.routes.set(msg.requestId,target);try{await this.agent.retry(msg.requestId);}finally{this.routes.delete(msg.requestId);}return;
+      case 'saveModels':if(this.agent.busy)throw new Error('Stop the task before saving model settings.');await this.providers.saveModels(msg.settings);break;
+      case 'traceInfo':await this.traceInfo(target);return;
+      case 'openTrace':await vscode.commands.executeCommand('vortex.openLastFlow');success();return;
+      case 'exportTrace':{
+        const uri=await vscode.window.showSaveDialog({defaultUri:vscode.Uri.file('vortex-flow.json'),filters:{JSON:['json']}});if(uri){await RunTrace.settled(this.traceUri().fsPath);const snapshot=await readFile(this.traceUri().fsPath);await vscode.workspace.fs.writeFile(uri,snapshot);}success();return;
+      }
+      case 'clearTrace':if(this.agent.busy)throw new Error('Stop the task before clearing its flow.');await RunTrace.settled(this.traceUri().fsPath);await unlink(this.traceUri().fsPath).catch((e)=>{if(e.code!=='ENOENT')throw e;});await this.traceInfo(target);success();return;
+      case 'cancelTestChat':this.chatTest?.abort();success();return;
+      case 'testChat':{
+        if(this.agent.busy||this.chatTest)throw new Error('Wait for the current operation to finish.');const controller=new AbortController();this.chatTest=controller;const started=Date.now();
+        try{const client=await this.providers.client(msg.model.providerId);const answer=await client.chat(msg.model.modelId,'Connection test. Reply only OK.',[{role:'user',content:'Reply OK.'}],controller.signal,{tokens:4096,output:64});this.post(target,{type:'chatTestResult',requestId:msg.requestId,ok:true,elapsed:Date.now()-started,message:answer.slice(0,500),protocol:'Chat (no tools)'});}
+        catch(e){this.post(target,{type:'chatTestResult',requestId:msg.requestId,ok:false,elapsed:Date.now()-started,message:controller.signal.aborted?'Test cancelled.':(e as Error).message,protocol:'Chat (no tools)'});}
+        finally{this.chatTest=undefined;}return;
+      }
       case 'setExecution':await this.providers.setExecution(msg.execution);break;
       case 'setToolProtocol': if(this.agent.busy)throw new Error('Stop the task before changing tool protocol.');await this.providers.setToolProtocol(msg.model,msg.protocol);break;
       case 'setContext': await this.providers.setContext(msg.model,msg.source,msg.tokens);break;
@@ -154,13 +174,13 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'setDefaultModel': await this.providers.setDefault(msg.mode,msg.model); break;
       case 'setConversation': await this.providers.setConversation(msg.patch); break;
       case 'saveProvider': {
-        if(this.agent.busy) throw new Error('Aguarde a tarefa terminar para editar conexões.');
+        if(this.agent.busy||this.chatTest) throw new Error('Wait for the current operation before editing connections.');
         const id=await this.providers.save(msg.provider); await this.state(); success('Conexão salva.',id);
         await this.providers.refresh(id,msg.requestId,()=>this.state()); return;
       }
       case 'testProvider': success(`Conexão testada: ${await this.providers.test(msg.provider)} modelos no catálogo. Isso não comprova suporte ao chat.`); return;
       case 'removeProvider':
-        if(this.agent.busy) throw new Error('Aguarde a tarefa terminar para remover conexões.');
+        if(this.agent.busy||this.chatTest) throw new Error('Wait for the current operation before removing connections.');
         await this.providers.remove(msg.id); await this.state(); success('Conexão removida.'); return;
       case 'refreshModels': await this.providers.refresh(msg.id,msg.requestId,()=>this.state()); success(); return;
       case 'selectModel':

@@ -16,6 +16,20 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.7.0
+
+- Input com 12 px internos, margem externa de 16 px, controles espaçados e layout em duas linhas na sidebar estreita.
+- Uma linha de progresso com fase, arquivo/ferramenta e tempo decorrido; respostas parciais permanecem identificadas se a conexão falhar.
+- Configurações separadas em Provedores, Modelos, Conversa, Execução e Diagnóstico. Preferências exigem Salvar por seção. Rascunhos sobrevivem à navegação entre seções e são descartados ao fechar a aba.
+- Dois tempos de espera: primeira resposta e inatividade durante streaming, ambos com padrão de 120 s. Cada conexão pode substituir os padrões globais. O limite total da tarefa inclui a espera por aprovação.
+- Rodadas de trabalho e chamadas de ferramentas têm limites independentes. Os valores antigos são migrados para os dois novos campos correspondentes.
+- Teste de chat explícito em Modelos, separado do catálogo, sem ferramentas ou contexto do workspace. Não substitui o fluxo JSON da tarefa e não comprova suporte a ferramentas.
+- Diagnóstico permite abrir, exportar e limpar o último fluxo. A gravação é serializada em segundo plano e preserva o formato solicitado.
+- Tentar novamente retoma o histórico da execução após uma falha de transporte, sem duplicar a pergunta ou reproduzir chamadas já concluídas. Resposta parcial ou ferramenta de resultado incerto exige revisão/continuação explícita.
+- Contexto estimado pelo payload efetivo, com margem de 20% e calibração por conexão/modelo quando a API informa uso. O medidor continua distinguindo estimativa e valor reportado.
+
+Ver [validação da 0.7.0](docs/validation-0.7.0.md).
+
 ## Versão 0.4.3
 
 O transporte OpenAI-compatible usa HTTP/HTTPS do Node, com TLS insecure aplicado por requisição. URLs base sem `/v1` são suportadas: o catálogo usa `<base>/models` e o chat `<base>/chat/completions`. Redirecionamentos são informados sem encaminhar chaves; falhas conhecidas de DNS, rede e certificado têm diagnóstico específico. A comparação e os testes estão em [docs/forge-connection-review.md](docs/forge-connection-review.md).
@@ -56,7 +70,7 @@ O executor impõe o modo independentemente do prompt. Saudações não iniciam f
 - **Review changes** mostra o registro da tarefa. **Undo task changes** restaura apenas versões ainda correspondentes às alterações do agente; conflitos e buffers não salvos são preservados.
 - O registro é salvo antes da aplicação. Comandos executados diretamente no computador não têm garantia de reversão.
 - **Implement plan** pede a permissão e inicia explicitamente Agent. **Continue** usa o progresso salvo; ferramentas de resultado incerto exigem revisão e nova instrução antes da retomada.
-- Limites em **Settings → Conversation**: 20 etapas, 60 s por comando, 30 min por tarefa e orçamento de tokens opcional. São configuráveis. Orçamento de tokens não representa um limite financeiro exato.
+- Limites em **Settings → Execution**: 20 rodadas de trabalho, 20 chamadas de ferramentas, 60 s por comando, 30 min por tarefa e orçamento de tokens opcional. São configuráveis. Orçamento de tokens não representa um limite financeiro exato.
 
 ### Contexto e histórico
 
@@ -116,4 +130,4 @@ Cada mensagem inicia um novo `last-flow.json` no armazenamento local do workspac
 
 O formato segue o exemplo de rastreamento: `conversation_id`, `model`, `temperature`, `max_tokens`, `system_prompt`, `user_question`, `turns` (request/response), `final_answer` e `sources`. Cada rodada contém o histórico enviado, definições de ferramentas e resposta recebida, normalizados entre provedores. Streaming é registrado como resposta acumulada, sem eventos individuais. Parâmetros não enviados ficam `null`; falhas ficam na resposta da rodada. Retentativas HTTP internas pertencem à mesma rodada.
 
-O arquivo é atualizado antes e depois de cada chamada, inclusive nas chamadas de resumo. Não inclui headers de autenticação e remove a chave configurada. Pode conter código, prompts e dados retornados pelas ferramentas; revise antes de compartilhar. Não é enviado automaticamente nem incluído no repositório. Falha de gravação é informada sem interromper o agente.
+O arquivo recebe snapshots em segundo plano antes e depois das chamadas, inclusive nos resumos; a finalização aguarda a última gravação. Não inclui headers de autenticação e remove a chave configurada. Pode conter código, prompts e dados retornados pelas ferramentas; revise antes de compartilhar. Não é enviado automaticamente nem incluído no repositório. Falha de gravação é informada sem interromper o agente.

@@ -14,10 +14,10 @@ export class ReviewService implements vscode.Disposable {
   await vscode.commands.executeCommand('vscode.diff',before,after,`Vortex · ${change.path}`,{preview:true});
  }
  async propose(session:string,file:string,before:string|null,after:string|null){return this.store.propose(session,file,before,after);}
- async chooseHunks(session:string,change:Change):Promise<string|undefined>{
+ async chooseHunks(session:string,change:Change,signal?:AbortSignal):Promise<string|undefined>{
   const patch=reviewPatch(change.before||'',change.after||'');
   const selected=await vscode.window.showQuickPick(patch.hunks.map((h,index)=>({label:`Lines ${h.oldStart}–${h.oldStart+h.oldLines}`,description:h.lines.filter(l=>l.startsWith('+')||l.startsWith('-')).join(' ').slice(0,180),index,picked:true})),{canPickMany:true,title:'Select changes to apply; unselected changes are rejected'});
-  if(!selected)return undefined;const after=selectHunks(change.before||'',patch,selected.map(s=>s.index));await this.store.replaceProposal(session,change.id,after);change.after=after;await this.preview(change);return after;
+  signal?.throwIfAborted();if(!selected)return undefined;const after=selectHunks(change.before||'',patch,selected.map(s=>s.index));await this.store.replaceProposal(session,change.id,after);change.after=after;await this.preview(change);return after;
  }
  mark(session:string,id:string,status:Change['status']){return this.store.mark(session,id,status);}
  async availability(session:string){const changes=await this.store.list(session);return {reviewChanges:changes.length>0,undoChanges:changes.some(c=>c.status==='applied'||c.status==='proposed')};}

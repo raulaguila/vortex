@@ -17,7 +17,7 @@ function harness(replies){
   return {agent,events,calls,tools,run};
 }
 test('execution token budget stops before an unaffordable provider request',async()=>{
- const h=harness([{action:'read',path:'a'}]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:20,commandTimeout:60,taskTimeout:1800,tokenBudget:100}});
+ const h=harness([{action:'read',path:'a'}]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:20,commandTimeout:60,taskTimeout:1800,tokenBudget:1024}});
  await h.run('Read the project');assert.equal(h.calls.length,0);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'stopped');
 });
 test('tool limit bounds a native batch without replaying unexecuted calls',async()=>{
@@ -78,7 +78,7 @@ test('denied actions end the turn without allowing an alternative tool',async()=
   let attempts=0;h.agent.execute=async()=>{attempts++;throw new ApprovalDenied();};
   await h.run('Implement the requested change');
   assert.equal(attempts,1);assert.equal(h.calls.length,1);
-  assert.ok(h.events.some(e=>e.type==='event'&&e.event.role==='activity'&&e.event.text.includes('denied')));
+  assert.ok(h.events.some(e=>e.type==='event'&&e.event.role==='activity'&&(e.event.activity?.status==='denied'||e.event.text.includes('denied'))));
 });
 test('read-only modes reject write attempts before the tool dispatcher',async()=>{
   for(const mode of ['ask','plan'])for(const permission of ['supervised','autonomous']){
@@ -191,4 +191,18 @@ test('step exhaustion synthesizes observed results without tools and stays pause
  const h=harness([]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:1,commandTimeout:60,taskTimeout:1800,tokenBudget:null}});let calls=0;
  h.agent.providers.client=async()=>({chat:async(_model,system,messages)=>{calls++;if(system.startsWith('Summarize the current task')){assert.ok(messages.some(m=>m.toolResult?.status==='success'));return 'Inspected README; implementation is still pending.';}return JSON.stringify({action:'read',path:'README.md'});}});
  await h.run('Inspect README','ask');assert.equal(calls,2);assert.equal(h.tools.length,1);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.session.runState,'paused');assert.ok(h.events.some(e=>e.event?.text==='Inspected README; implementation is still pending.'));
+});
+
+test('retry retains tool results without adding a duplicate user message',async()=>{
+ const {ExecutionError}=require('../dist/execution');const h=harness([]);let count=0;
+ h.agent.providers.client=async()=>({chat:async()=>{count++;if(count===1)return JSON.stringify({action:'read',path:'a'});if(count===2)throw new ExecutionError('transport','offline',true);return 'File a was read.';}});
+ await h.run('Read a','ask');assert.equal(h.events.findLast(e=>e.type==='runFailure').retryable,true);await h.agent.retry('retry');assert.equal(h.tools.length,1);assert.equal(h.events.filter(e=>e.event?.role==='user').length,1);assert.equal(h.events.at(-1).status,'complete');
+});
+test('round budget and tool call budget are independent',async()=>{
+ const h=harness([]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxRounds:1,maxToolCalls:4,commandTimeout:60,taskTimeout:1800,tokenBudget:null}});h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'read',arguments:{path:'b'}}]})});await h.run('Read a and b','ask');assert.equal(h.tools.length,2);assert.equal(h.events.at(-1).status,'stopped');assert.ok(h.events.some(e=>e.event?.text.includes('Work round limit')));
+});
+test('partial streaming response is saved as incomplete and is not retryable',async()=>{
+ const {ExecutionError}=require('../dist/execution');const h=harness([]);h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async(...args)=>{args[6]('Partial answer');throw new ExecutionError('idle_timeout','stalled',true);}});await h.run('Describe the project','ask');assert.equal(h.tools.length,0);assert.ok(h.events.some(e=>e.type==='stream'&&e.incomplete));assert.equal(h.events.findLast(e=>e.type==='runFailure').retryable,false);assert.ok(h.agent.events.some(e=>e.incomplete));
 });
