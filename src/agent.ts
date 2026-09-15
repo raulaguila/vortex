@@ -83,9 +83,9 @@ export class AgentController extends AgentRuntime {
       const cwd=a.cwd&&a.cwd!=='.'?await safePath(root,a.cwd):root;
       if(permission==='autonomous'){
         this.sandbox??=new Sandbox(this.artifactsDirectory&&this.session?path.join(this.artifactsDirectory,this.session.id):undefined);
-        if(await this.sandbox.available()){
+        const image=vscode.workspace.getConfiguration?.('vortex').get<string>('sandbox.image')||'node:22-bookworm-slim';
+        if(await this.sandbox.available(image)){
           if(a.network&&await this.approval(()=>vscode.window.showWarningMessage('Allow network for this sandbox command?',{modal:true,detail:a.command},'Allow network'))!=='Allow network')throw new ApprovalDenied();
-          const image=vscode.workspace.getConfiguration?.('vortex').get<string>('sandbox.image')||'node:22-bookworm-slim';
           const result=await this.sandbox.execute(root,a.cwd&&a.cwd!=='.'?`cd '${a.cwd.replace(/'/g,"'\\''")}' && ${a.command}`:a.command,signal,this.commandTimeout,!!a.network,image,(stream,text)=>this.commandOutput(stream,text));
           if(result.failure){try{for(const change of result.changes)if(this.session&&this.reviews)await this.reviews.propose(this.session.id,change.path,change.before,change.after);if(result.changes.length)this.event('activity','Interrupted sandbox changes\nChanges retained for review; no changes imported.');}catch{throw new ExecutionError('uncertain_outcome','The interrupted command could not save all review data. Inspect the workspace and diagnostics before continuing.');}throw result.failure;}
           if(result.artifacts.length)this.event('activity','Sandbox artifacts\n'+result.artifacts.join('\n'));
@@ -98,7 +98,7 @@ export class AgentController extends AgentRuntime {
           if(result.error)throw new Error(result.error);
           return result.output;
         }
-        this.event('activity','Sandbox unavailable\nDocker is not available. This command requires host approval.');
+        this.event('activity','Sandbox unavailable\nDocker or the configured image is unavailable. This command requires host approval.');
       }
       if(await this.approval(()=>vscode.window.showWarningMessage('Executar comando no workspace?',{modal:true,detail:cwd+'\n\n'+a.command},'Executar'))!=='Executar')throw new ApprovalDenied();
       signal.throwIfAborted();return runCommand(a.command,cwd,signal,this.commandTimeout,1024*1024,(stream,text)=>this.commandOutput(stream,text));

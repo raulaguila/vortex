@@ -38,7 +38,7 @@ export class Sandbox {
    }
   }
  }
- async available(){if(process.platform==='win32')return false;return new Promise<boolean>(resolve=>execFile('docker',['info','--format','{{.ServerVersion}}'],{timeout:5000},error=>resolve(!error)));}
+ async available(image?:string){if(process.platform==='win32')return false;const running=await new Promise<boolean>(resolve=>execFile('docker',['info','--format','{{.ServerVersion}}'],{timeout:5000},error=>resolve(!error)));if(!running||!image)return running;return new Promise<boolean>(resolve=>execFile('docker',['image','inspect','--format','{{.Id}}',image],{timeout:5000},(error,stdout)=>resolve(!error&&/^sha256:[a-f0-9]{64}$/.test(stdout.trim()))));}
  async dispose(){if(this.cleanupFailed)return;if(this.leaseFile)await rm(this.leaseFile,{force:true});if(this.directory)await rm(this.directory,{recursive:true,force:true});this.directory=undefined;}
  async execute(root:string,command:string,signal:AbortSignal,timeout:number,network=false,image='node:22-bookworm-slim',onOutput?:(stream:'stdout'|'stderr',text:string)=>void){
   image=await new Promise<string>((resolve,reject)=>execFile('docker',['image','inspect','--format','{{.Id}}',image],{timeout:10000},(error,stdout)=>!error&&/^sha256:[a-f0-9]{64}$/.test(stdout.trim())?resolve(stdout.trim()):reject(new Error('Sandbox image is not available locally. Use Download sandbox image in settings.'))));

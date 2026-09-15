@@ -17,7 +17,7 @@ test('real executor requires approval for supervised writes and edits; invalid e
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-approval-'));
   try{
     const file=path.join(root,'settings.json');await fs.writeFile(file,'original');
-    const agent=new AgentController({},()=>{},{});agent.sandbox={available:async()=>false};const signal=new AbortController().signal;
+    const agent=new AgentController({},()=>{},{});agent.sandbox={available:async image=>{assert.equal(image,'node:22-bookworm-slim');return false;}};const signal=new AbortController().signal;
     const actions=[{action:'write',path:'settings.json',content:'changed'},{action:'edit',path:'settings.json',oldText:'original',newText:'changed'}];
     for(const action of actions){const before=prompts;await assert.rejects(agent.execute(action,'agent',root,signal,'supervised'),/Approval denied/);assert.equal(prompts,before+1);assert.equal(await fs.readFile(file,'utf8'),'original');}
     const before=prompts;

@@ -3,6 +3,7 @@
 ## Entrega
 
 - O runtime do agente é compartilhado pela extensão, avaliações e diagnóstico isolado de ferramentas.
+- Se Docker ou a imagem configurada estiver indisponível, comandos autônomos exigem aprovação explícita no host.
 - Timeouts, cancelamento e saída parcial mantêm sua classificação. Operações de resultado incerto pausam a tarefa; continuar exige revisão explícita. Alterações de comandos isolados interrompidos são propostas para revisão, sem importação automática.
 - A saída dos comandos aparece durante a execução. Atividades distinguem recuperação, falha, interrupção e resultado incerto.
 - Resultados paginados persistem entre execuções, com limite de 64 MiB por sessão e expiração explícita. A compactação também cobre turnos longos.

@@ -33,9 +33,6 @@ jobs:
       - if: runner.os != 'Linux'
         run: node node_modules/playwright-core/cli.js install chromium
         timeout-minutes: 5
-      - if: runner.os == 'Linux'
-        name: Test host approval without a Docker daemon
-        run: sudo systemctl stop docker.service docker.socket
       - if: runner.os != 'Linux'
         run: npm run test:ui && npm run test:host
       - if: runner.os == 'Linux'
@@ -57,7 +54,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: sudo systemctl stop docker.service docker.socket
       - run: xvfb-run -a npm run test:host
         env:
           VSCODE_VERSION: 1.96.0
