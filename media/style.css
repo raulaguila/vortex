@@ -159,7 +159,10 @@ footer { padding-inline: 4px; }
 #recent-sessions .section-heading { color: var(--muted); font-size: 11px; }
 #recent-sessions .section-heading button { font-size: 10px; }
 .session-row { display:flex;align-items:center;gap:8px;padding:3px 0;min-width:0; }
-.session-title { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;min-width:0;font-size:12px; }
+.session-title { flex:1;display:flex;align-items:center;gap:8px;text-align:left;min-width:0;font-size:12px; }
+.session-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.session-title:hover, .session-title:focus-visible { background:var(--vscode-list-hoverBackground,var(--hover)); }
+.session-title small { flex-shrink:0; }
 .session-row small { color:var(--muted);font-size:10px;white-space:nowrap; }
 .choice-trigger { font-size:11px;white-space:nowrap;padding:4px 2px; }
 .choice-menu { position:fixed;left:6px;right:6px;z-index:15;padding:5px;border:1px solid var(--line);border-radius:8px;background:var(--vscode-quickInput-background,var(--bg));box-shadow:0 5px 20px #0004;max-height:60vh;overflow:auto; }
