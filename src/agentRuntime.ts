@@ -65,7 +65,7 @@ export class AgentRuntime {
   get activeSessionId(){return this.session?.id;}
   async resume(requestId:string,implement=false){
     if(!this.session||this.busy)throw new Error('Open an idle session first.');
-    
+
     const session=this.session;const revision=this.navigationVersion;
     if(implement){if(!this.checklist.length)throw new Error('No plan to implement.');const chosen=await this.host.choosePermission();if(!chosen)return;if(this.busy||this.session!==session||revision!==this.navigationVersion)throw new Error('Task changed during plan approval.');this.session.permission=chosen as Permission;}
     if(implement)await this.providers.applyMode('agent');
@@ -103,7 +103,7 @@ export class AgentRuntime {
   private async startRun(msg: Extract<Request, {type: 'start'}>,attachments:Attachment[]=[],retry=false){
     if(this.run)throw new Error('Já existe uma tarefa em execução.');
     if(!this.host.trusted())throw new Error('Confie no workspace antes de iniciar.');
-    
+
     if(this.session?.pendingTool){const current=this.session;const confirmed=await this.host.confirmUncertain();if(!confirmed)throw new Error('Review the workspace before continuing.');if(this.run||this.session!==current)throw new Error('Task changed during confirmation.');current.pendingTool=undefined;}
     if(!isMode(msg.mode)||!isPermission(msg.permission))throw new Error('Modo inválido.');
     const mode=msg.mode;let root=this.session?.root||this.host.roots()[0];
