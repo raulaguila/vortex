@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.vsix
+.DS_Store
+test-results/
+media/vendor.js
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key

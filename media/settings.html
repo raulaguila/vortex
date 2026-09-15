@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; img-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+  <link rel="stylesheet" href="{{style}}">
+  <title>Vortex — Configurações</title>
+</head>
+<body class="settings-body">
+  <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6M8 12h12"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-7 7 7-7 7 7"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v5c0 5-8 10-8 10S4 16 4 11V6Z"/><path d="m9 11 2 2 4-4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-model" viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="13" rx="4"/><path d="M12 3v3M2 12h3m14 0h3M9 11v2m6-2v2m-6 3h6"/></symbol>
+  </defs></svg>
+<header class="settings-header"><img src="{{logo}}" alt=""><div><span class="eyebrow">VORTEX</span><h1>Configurações</h1></div></header>
+<div class="settings-layout"><nav class="settings-nav" role="tablist" aria-label="Seções de configurações">
+<button id="nav-providers" role="tab" aria-controls="section-providers" aria-selected="true" data-section="providers">Provedores</button>
+<button id="nav-models" role="tab" aria-controls="section-models" aria-selected="false" tabindex="-1" data-section="models">Modelos</button>
+<button id="nav-conversation" role="tab" aria-controls="section-conversation" aria-selected="false" tabindex="-1" data-section="conversation">Conversa</button>
+</nav><main class="settings-content">
+<div id="settings-notice" class="notice" role="status" aria-live="polite"></div>
+<section id="section-providers" role="tabpanel" aria-labelledby="nav-providers">
+<div class="section-intro"><h2>Conecte seus provedores</h2><p>Seus modelos, suas chaves. As credenciais ficam no cofre do VS Code.</p></div>
+    <div class="section-heading"><h2>Provedores</h2><button id="add-provider" class="text-button"><svg><use href="#i-plus"/></svg>Adicionar</button></div>
+    <div id="connections"></div>
+
+    <dialog id="provider-dialog" aria-labelledby="form-title"><form id="provider-form" hidden>
+      <div class="section-heading"><h2 id="form-title">Nova conexão</h2><button id="cancel-form" type="button" class="icon-button" aria-label="Fechar formulário">×</button></div>
+      <label for="provider-kind">Provedor</label><select id="provider-kind"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="ollama">Ollama</option><option value="compatible">OpenAI-compatible</option></select>
+      <label for="provider-name">Nome da conexão</label><input id="provider-name" maxlength="80" required placeholder="Ex.: OpenAI pessoal">
+      <label for="provider-url">URL base</label><input id="provider-url" type="url" required placeholder="https://api.exemplo.com/v1" spellcheck="false" autocomplete="off"><p class="field-hint">Use a URL da API. Em endpoints compatíveis, inclua /v1 quando necessário.</p>
+      <div id="tls-setting" hidden><label class="checkbox-label"><input id="tls-insecure" type="checkbox">TLS insecure</label><p class="field-hint">Desativa a validação do certificado HTTPS apenas nesta conexão.</p></div>
+      <div class="label-row"><label for="provider-key">API key</label><span id="key-status" class="field-hint"></span></div><input id="provider-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Cole sua chave" aria-describedby="key-hint"><p id="key-hint" class="field-hint">Sua chave nunca é exibida após ser salva.</p>
+      <label id="clear-key-label" class="checkbox-label" hidden><input id="clear-key" type="checkbox">Remover a chave salva</label>
+      <div id="form-notice" class="notice" role="status" aria-live="polite"></div>
+      <div class="form-actions"><button id="test-provider" type="button" class="secondary-button">Testar conexão</button><button id="save-provider" type="submit" class="primary-button">Salvar</button></div>
+      <p class="field-hint">O teste consulta o catálogo. A disponibilidade no catálogo não garante suporte ao chat.</p>
+    </form></dialog>
+
+</section>
+<section id="section-models" role="tabpanel" aria-labelledby="nav-models" hidden>
+<div class="section-intro"><h2>Um modelo para cada tarefa</h2><p>Escolha os padrões de cada modo e organize seu catálogo.</p></div>
+<div class="defaults-card"><h3>Modelos padrão</h3><p>Aplicados ao trocar de modo ou iniciar uma nova tarefa.</p>
+<label for="default-ask">Perguntar</label><select id="default-ask" data-default="ask"></select>
+<label for="default-plan">Planejar</label><select id="default-plan" data-default="plan"></select>
+<label for="default-agent">Agente</label><select id="default-agent" data-default="agent"></select></div>
+<section class="defaults-card context-settings"><h3>Context window</h3><p>The API limit is shown when available. Otherwise, use a custom budget.</p><label for="context-model">Model</label><select id="context-model"></select><button id="inspect-context" class="text-button">Discover API limit</button><p id="context-limit" role="status"></p><label for="context-source">Context source</label><select id="context-source"><option value="api">Use API limit</option><option value="custom">Custom budget</option></select><label for="context-tokens">Tokens</label><input id="context-tokens" type="number" min="1024" max="10000000" step="1" value="16384"><button id="save-context" class="primary-button">Save context</button><p>Older exchanges are removed from requests automatically. The saved conversation remains complete. Usage is estimated; output tokens are reserved.</p></section><div class="section-heading catalog-heading"><h3>Catálogo e favoritos</h3></div>
+<div class="catalog-search"><svg><use href="#i-search"/></svg><input id="model-search" type="search" placeholder="Buscar modelo ou provedor…" aria-label="Buscar modelo ou provedor"></div>
+<div id="model-options" class="model-options settings-catalog"></div>
+    <section id="manual-section" class="manual-section" hidden><h2>Modelos manuais</h2><p>Não encontrou um modelo? Adicione o ID informado pelo provedor.</p><form id="manual-form"><label class="sr-only" for="manual-provider">Conexão para modelo manual</label><select id="manual-provider" required></select><div class="inline-field"><label class="sr-only" for="manual-id">ID do modelo</label><input id="manual-id" maxlength="500" required placeholder="ID do modelo" autocomplete="off" spellcheck="false"><button id="add-manual" class="secondary-button" type="submit" aria-label="Adicionar modelo manual">Adicionar</button></div></form><div id="manual-list"></div></section>
+</section>
+<section id="section-conversation" role="tabpanel" aria-labelledby="nav-conversation" hidden>
+<div class="section-intro"><h2>Do seu jeito</h2><p>Ajuste a conversa para o seu fluxo de trabalho.</p></div>
+<div class="preference-row"><div><label for="ui-language">Interface language</label><p>English and Portuguese.</p></div><select id="ui-language"><option value="en">English</option><option value="pt">Português</option></select></div><div class="preference-row"><div><label for="language">Idioma das respostas</label><p>Aplicado na próxima execução do agente.</p></div><select id="language"><option value="auto">Seguir a mensagem</option><option value="pt">Português</option><option value="en">Inglês</option><option value="es">Espanhol</option></select></div>
+<div class="preference-row"><div><label for="font-size">Tamanho da fonte</label><p>O tamanho da conversa acompanha sua preferência.</p></div><select id="font-size"><option value="">Seguir VS Code</option><option value="11">11 px</option><option value="12">12 px</option><option value="13">13 px</option><option value="14">14 px</option><option value="15">15 px</option><option value="16">16 px</option><option value="17">17 px</option><option value="18">18 px</option><option value="19">19 px</option><option value="20">20 px</option></select></div>
+<div class="preference-row"><div><label for="send-key">Enviar mensagem com</label><p>Shift+Enter sempre insere uma nova linha.</p></div><select id="send-key"><option value="enter">Enter</option><option value="modifierEnter">Ctrl/Cmd+Enter</option></select></div>
+<p class="autosave-note">As preferências são salvas automaticamente neste perfil.</p>
+</section></main></div><script nonce="{{nonce}}" src="{{shared}}"></script><script nonce="{{nonce}}" src="{{vendor}}"></script><script nonce="{{nonce}}" src="{{script}}"></script></body></html>

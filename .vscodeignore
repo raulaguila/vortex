@@ -1,0 +1,15 @@
+src/**
+test/**
+.vscode/**
+tsconfig.json
+**/*.map
+test-results/
+media/vendor-entry.js
+Makefile
+notes.md
+.gitignore
+
+node_modules/**
+dist/**
+!dist/extension.js
+scripts/**
