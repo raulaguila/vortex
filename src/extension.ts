@@ -97,7 +97,7 @@ class VortexController implements vscode.WebviewViewProvider {
     webview.options = {enableScripts:true,localResourceRoots:[media]};
     const asset = (name: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, name)).toString();
     webview.html = renderSidebar(readFileSync(vscode.Uri.joinPath(media, kind === 'chat' ? 'sidebar.html' : 'settings.html').fsPath, 'utf8'), {
-      cspSource:webview.cspSource, nonce:randomBytes(24).toString('hex'), style:asset(kind === 'chat' ? 'style.css' : 'settings.css'), script:asset(kind === 'chat' ? 'app.js' : 'settings.js'), logo:asset('vortex.svg'),shared:asset('shared.js'),vendor:asset('vendor.js'),picker:asset('picker.js')
+      cspSource:webview.cspSource, nonce:randomBytes(24).toString('hex'), style:asset(kind === 'chat' ? 'style.css' : 'settings.css'), script:asset(kind === 'chat' ? 'app.js' : 'settings.js'), logo:asset('vortex.svg'),shared:asset('shared.js'),vendor:asset('vendor.js'),picker:asset('picker.js'),version:this.ctx.extension.packageJSON.version
     });
     const listener = webview.onDidReceiveMessage(async (raw: unknown) => {
       let msg: Request;
