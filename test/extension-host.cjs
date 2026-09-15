@@ -73,6 +73,11 @@ const root=path.resolve(__dirname,'..');
       }
     }
     await choose('mode','Analyze and create');
+    await send('O que pode me dizer sobre o projeto atual?',[
+      {action:'finish',text:'Vou explorar os arquivos do workspace para entender o projeto.'},
+      {action:'list',pattern:'**/*'},
+      {action:'finish',text:'Workspace inspection completed after announcement recovery.'}
+    ],'Workspace inspection completed after announcement recovery.');
     await send('Plan an update to approval.txt',[
       {action:'plan',items:[{id:'implement',text:'Update approval.txt',status:'pending'}]},
       {action:'finish',text:'Plan ready for implementation.'}],'Plan ready for implementation.');

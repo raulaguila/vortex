@@ -154,3 +154,35 @@ test('task controls reflect saved outcomes and actual change availability',async
  h.agent.session.mode='plan';h.agent.checklist=[{id:'a',text:'Do work',status:'pending'}];h.agent.reviews={availability:async()=>({reviewChanges:true,undoChanges:true})};await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,true);assert.equal(h.events.at(-1).undoChanges,true);
  h.agent.run=new AbortController();await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,false);assert.equal(h.events.at(-1).undoChanges,false);
 });
+
+test('standalone action announcements get one recovery, then real tools continue in the same mode',async()=>{
+ for(const mode of ['ask','plan','agent'])for(const permission of ['supervised','autonomous']){
+  const h=harness([{action:'finish',text:'Vou explorar os arquivos do workspace para entender o projeto.'},{action:'list',pattern:'src/**'},{action:'finish',text:'O projeto contém uma aplicação TypeScript.'}]);
+  await h.run('O que pode me dizer sobre o projeto atual?',mode,permission);assert.equal(h.calls.length,3);assert.equal(h.tools.length,1);assert.equal(h.tools[0].action,'list');assert.equal(h.events.at(-1).status,'complete');assert.match(h.calls[1][2].at(-1).content,/not a new user request or authorization/);
+ }
+});
+test('repeated announcements pause instead of reporting completion or looping',async()=>{
+ const h=harness([{action:'finish',text:'I will inspect the workspace.'}]);await h.run('Describe this project','ask');assert.equal(h.calls.length,2);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.session.runState,'paused');
+});
+test('native announcement recovery retains tool result association',async()=>{
+ const h=harness([]);let requests=0;
+ h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async()=>++requests===1?{text:'I will inspect the project.',calls:[]}:requests===2?{text:'',calls:[{id:'read1',name:'read',arguments:{path:'README.md'}}]}:{text:'The project is an extension.',calls:[]}});
+ await h.run('Describe the project','ask');assert.equal(requests,3);assert.equal(h.tools.length,1);assert.equal(h.agent.messages.filter(m=>m.toolResult)[0].toolResult.id,'read1');assert.equal(h.events.at(-1).status,'complete');
+});
+test('recovery never bypasses read-only policies and still stops on refusal',async()=>{
+ const h=harness([{action:'finish',text:'Vou editar os arquivos.'},{action:'write',path:'a',content:'bad'},{action:'finish',text:'Use Agent para aplicar alterações.'}]);await h.run('Explain how to implement this','ask');assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
+ const denied=harness([{action:'finish',text:'I will edit the file.'},{action:'write',path:'a',content:'new'}]);denied.agent.execute=async()=>{throw new (require('../dist/actions').ApprovalDenied)();};await denied.run('Edit a','agent');assert.equal(denied.calls.length,2);assert.equal(denied.events.at(-1).status,'stopped');
+});
+test('useful answers, questions, blockers and quoted examples do not trigger recovery',()=>{
+ const {isActionAnnouncement}=require('../dist/intent');
+ for(const text of ['Como posso ajudar?','O projeto usa TypeScript.','Vou verificar, mas preciso que você abra uma pasta.','I will inspect if you open the workspace.','"Vou explorar os arquivos."','Example: I will inspect files.','Vou explicar o padrão MVC.','Vou verificar os testes. Os anteriores passaram.'])assert.equal(isActionAnnouncement(text),false,text);
+ for(const text of ['Vou explorar os arquivos do workspace para entender o projeto.','I’ll inspect the workspace.','Voy a analizar el proyecto.'])assert.equal(isActionAnnouncement(text),true,text);
+});
+test('stop and step limits take precedence over announcement recovery',async()=>{
+ const h=harness([{action:'finish',text:'I will inspect the project.'}]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:1,commandTimeout:60,taskTimeout:1800,tokenBudget:null}});await h.run('Inspect project','ask');assert.equal(h.calls.length,1);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'stopped');
+});
+
+test('requested translations can legitimately contain an action announcement',async()=>{
+ const h=harness([{action:'finish',text:'Vou explorar os arquivos.'}]);await h.run('Traduza: I will explore the files.','ask');assert.equal(h.calls.length,1);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
+});

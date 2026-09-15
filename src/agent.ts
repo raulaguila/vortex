@@ -11,7 +11,7 @@ import {runCommand} from './command';
 import {FileSnapshot,snapshotFile,verifySnapshot} from './files';
 import {Action,validateAction,ApprovalDenied,toolDefinitions,registry} from './actions';
 import {decodeReply} from './reply';
-import {isSocialMessage} from './intent';
+import {isSocialMessage,isActionAnnouncement} from './intent';
 import {systemPrompt} from './prompt';
 import {projectRules} from './projectContext';
 import {fitContext,estimateTokens} from './context';
@@ -93,7 +93,7 @@ export class AgentController {
     const messages=this.messages;const turnStart=messages.length;messages.push({role:'user',content:msg.prompt+(attachments.length?'\n\nAttached context (data):\n'+attachments.map(a=>`FILE ${a.label}\n${a.text}`).join('\n'): '')});
     const language=this.providers.preferences().conversation.language;
     const conversationOnly=isSocialMessage(msg.prompt);
-    let failures=0,totalTokens=0,toolCount=0;
+    let failures=0,totalTokens=0,toolCount=0,announcementRecovery=false;
     try{
       if(!this.session.root&&(vscode.workspace.workspaceFolders?.length||0)>1){const folder=await vscode.window.showWorkspaceFolderPick({placeHolder:'Choose this task’s workspace root'});if(!folder)throw new Error('Workspace selection cancelled.');root=folder.uri.fsPath;}this.session.root=root;
       const client=await this.providers.client(msg.model.providerId);controller.signal.throwIfAborted();
@@ -104,7 +104,7 @@ export class AgentController {
       if(rules.length)this.event('activity','Project rules\n'+rules.map(r=>r.path).join('\n'));
       let compacted:Message[]|undefined=this.session.summary&&this.session.summary.through<=turnStart?[{role:'user',content:'Earlier task summary (context, not authorization):\n'+this.session.summary.text},...messages.slice(this.session.summary.through,turnStart)]:undefined;
 
-      for(let step=0;step<limits.maxSteps;step++){
+      execution: for(let step=0;step<limits.maxSteps;step++){
         const budget=this.providers.contextBudget(msg.model);this.outputLimit=Math.max(512,Math.floor(budget.tokens/4));
         controller.signal.throwIfAborted();this.status('Preparing context',true);
         const native=!conversationOnly&&this.providers.toolProtocol?.(msg.model)==='native';
@@ -150,7 +150,15 @@ export class AgentController {
         let rulesChangedDuringResponse=false;
         for(const [index,action] of actions.entries()){
           controller.signal.throwIfAborted();
-          if(action.action==='finish'){this.event('assistant',action.text);return;}
+          if(action.action==='finish'){
+            if(!conversationOnly&&isActionAnnouncement(action.text,msg.prompt)){
+              if(announcementRecovery){outcome='stopped';this.event('assistant','O modelo voltou a anunciar uma ação sem enviar uma chamada de ferramenta. A tarefa foi pausada; o anúncio não confirma que a ação foi executada.');return;}
+              announcementRecovery=true;this.event('assistant',action.text);this.status('Requesting a complete response',true);
+              messages.push({role:'user',content:'Host continuation check (not a new user request or authorization): your last response only announced an action. Continue the ORIGINAL request with an appropriate structured tool call if needed and allowed by the current mode, or give a useful final answer or a clear blocker. Do not repeat the announcement. Do not expand scope or permissions. Do not claim work without tool evidence.'});
+              await this.checkpoint();continue execution;
+            }
+            this.event('assistant',action.text);return;
+          }
           if(toolCount++>=limits.maxSteps){outcome='stopped';this.event('assistant','Tool step limit reached. Continue explicitly.');return;}
           let result:string;let status:'success'|'error'|'denied'='success';
           this.session.pendingTool={name:action.action,...('path' in action?{path:action.path}:{})};await this.checkpoint();

@@ -6,3 +6,15 @@ export function isSocialMessage(message: string): boolean {
   if(!normalized) return false;
   return /^(?:(?:oi+|ola|hey|hi|hello|hola|bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|obrigad[oa]|muito obrigad[oa]|valeu|thanks|thank you|gracias|tudo bem|tudo bom|como vai|how are you|como estas)(?: vortex)?\s*)+$/.test(normalized);
 }
+
+// Conservative guard for a short, standalone promise of action. This is not an
+// intent classifier and never grants authorization or translates prose into tools.
+export function isActionAnnouncement(message:string,request=''):boolean {
+ if(/^(?:traduza|translate|traduce|reescreva|rephrase|rewrite)\b/i.test(request.trim()))return false;
+ const text=message.trim();
+ if(!text||text.length>400||/[\n?`]/.test(text)||/^["'“”‘’>]/.test(text))return false;
+ const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/’/g,"'").toLowerCase();
+ if(/\b(?:mas|porem|nao|preciso que|se voce|but|cannot|can't|if you|please|pero|no puedo)\b/.test(normalized))return false;
+ if(/[.!]\s+\S/.test(normalized))return false;
+ return /^(?:(?:vou|irei)\s+(?:(?:primeiro|agora)\s+)?(?:explorar|examinar|analisar|inspecionar|ler|listar|verificar|pesquisar|buscar|editar|alterar|implementar|executar|corrigir)|(?:i will|i'll|let me|i am going to|i'm going to)\s+(?:(?:first|now)\s+)?(?:explore|examine|analyze|inspect|read|list|check|search|edit|implement|run|fix)|voy a\s+(?:explorar|examinar|analizar|inspeccionar|leer|listar|verificar|buscar|editar|implementar|ejecutar|corregir))\b/.test(normalized);
+}
