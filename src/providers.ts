@@ -1,8 +1,12 @@
 import type {ModelLimits} from './protocol';
-import {Agent} from 'undici';
+import {compatibleRequest,connectionError} from './httpTransport';
+import {setTimeout as delay} from 'node:timers/promises';
+import {nativePayload,decodeNative,Turn,ToolCall,ToolResult,ToolsUnsupported} from './native';
+import {readStream} from './stream';
+import type {ToolDefinition} from './actions';
 export type Kind = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'compatible';
 export interface Provider { id: string; name: string; kind: Kind; baseUrl: string; tlsInsecure?: boolean }
-export interface Message { role: 'user' | 'assistant'; content: string }
+export interface Message { role: 'user' | 'assistant'; content: string; toolCalls?:ToolCall[]; toolResult?:ToolResult; continuation?:unknown; continuationKind?:Kind }
 export const defaults: Record<Kind, string> = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',gemini:'https://generativelanguage.googleapis.com/v1beta',ollama:'http://localhost:11434',compatible:''};
 export function validateUrl(value: string): string {
   const u = new URL(value);
@@ -10,34 +14,35 @@ export function validateUrl(value: string): string {
   return u.toString().replace(/\/$/, '');
 }
 export class Client {
-  constructor(private p: Provider, private key: string, private transport: typeof fetch = fetch) {}
-  private async request(path: string, body?: unknown, signal?: AbortSignal): Promise<any> {
+  constructor(private p: Provider, private key: string, private transport?: typeof fetch) {}
+  private async request(path: string, body?: unknown, signal?: AbortSignal,consume?:(response:Response)=>Promise<unknown>,attempt=0): Promise<any> {
     const headers: Record<string,string> = {'Content-Type':'application/json'};
     if(this.p.kind==='anthropic') { headers['x-api-key']=this.key; headers['anthropic-version']='2023-06-01'; }
     else if(this.p.kind==='gemini') headers['x-goog-api-key']=this.key;
     else if(this.key) headers.Authorization=`Bearer ${this.key}`;
-    const dispatcher = this.p.kind === 'compatible' && this.p.tlsInsecure && new URL(this.p.baseUrl).protocol === 'https:'
-      ? new Agent({connect: {rejectUnauthorized: false}}) : undefined;
-    try {
     let response: Response;
     try {
-      const options: RequestInit & {dispatcher?: Agent} = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(30000),redirect:'error',...(dispatcher ? {dispatcher} : {})};
-      response = await this.transport(`${validateUrl(this.p.baseUrl)}${path}`, options);
+      const options: RequestInit = {method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(30000),redirect:'manual'};
+      const url=`${validateUrl(this.p.baseUrl)}${path}`;
+      response = await (this.transport?this.transport(url,options):this.p.kind==='compatible'?compatibleRequest(url,options,!!this.p.tlsInsecure):fetch(url,options));
     } catch (error) {
       if(signal?.aborted) throw error;
       if(error instanceof Error && error.name === 'TimeoutError') throw new Error(`${this.p.name}: tempo de conexão esgotado. Tente novamente.`);
-      throw new Error(`${this.p.name}: conexão indisponível. Verifique a URL e se o servidor está acessível.`);
+      throw new Error(`${this.p.name}: conexão indisponível. ${connectionError(error)}`);
     }
+    if([429,502,503,504].includes(response.status)&&attempt<2){await response.body?.cancel();await delay(250*(2**attempt),undefined,{signal});return this.request(path,body,signal,consume,attempt+1);}
     if(!response.ok) {
-      const detail = [401,403].includes(response.status) ? 'Falha de autenticação. Verifique a chave e as permissões.'
+      if([400,422].includes(response.status)&&body&&typeof body==='object'&&'tools' in body){
+        const text=(await response.text()).slice(0,16384);if(/(?:does not support|unsupported|not supported)[^\n]{0,80}(?:tools|function.call)|(?:tools|function.call)[^\n]{0,80}(?:not supported|unsupported)/i.test(text))throw new ToolsUnsupported();
+      }
+      const detail = response.status>=300&&response.status<400 ? 'A API redirecionou a requisição. Configure a URL base final do serviço.' : [401,403].includes(response.status) ? 'Falha de autenticação. Verifique a chave e as permissões.'
         : response.status === 429 ? 'Limite de uso atingido. Tente novamente mais tarde.'
         : response.status === 404 ? 'Endpoint ou modelo não encontrado. Verifique a URL e o ID.'
         : 'Provedor indisponível. Tente novamente.';
-      throw new Error(`${this.p.name}: HTTP ${response.status}. ${detail}`);
+      await response.body?.cancel().catch(()=>undefined);throw new Error(`${this.p.name}: HTTP ${response.status}. ${detail}`);
     }
-    try { return await response.json(); }
+    try { return consume?await consume(response):await response.json(); }
     catch { signal?.throwIfAborted();throw new Error(`${this.p.name}: resposta inválida da API. Verifique a URL base.`); }
-    } finally { await dispatcher?.destroy(); }
   }
   async models(): Promise<string[]> {
     const all:string[]=[];
@@ -67,9 +72,22 @@ export class Client {
       : this.p.kind === 'ollama' ? positive(Object.entries(raw.model_info || {}).find(([k]) => k.endsWith('.context_length'))?.[1])
       : positive(raw.context_length ?? raw.max_context_length ?? raw.max_model_len);
     const output = positive(this.p.kind === 'gemini' ? raw.outputTokenLimit : raw.max_tokens ?? raw.max_output_tokens);
-    return {input,output,status:input?'ready':'unknown'};
+    return {input,output,status:input?'ready':'unknown',...(Array.isArray(raw.capabilities)?{tools:raw.capabilities.includes('tools')}:{})};
+  }
+  async turn(model:string,system:string,messages:Message[],signal:AbortSignal,budget:{tokens:number;output:number},tools:ToolDefinition[],onText?:(text:string)=>void):Promise<Turn>{
+    const request=nativePayload(this.p.kind,model,system,messages,tools,budget);
+    if(onText){
+      if(this.p.kind==='gemini')request.path=request.path.replace(':generateContent',':streamGenerateContent?alt=sse');
+      else Object.assign(request.body,{stream:true});
+    }
+    return decodeNative(this.p.kind,await this.request(request.path,request.body,signal,onText?response=>{
+      if(response.headers.get('content-type')?.includes('application/json'))return response.json();
+      return readStream(response,this.p.kind,signal,onText);
+    }:undefined));
   }
   async chat(model:string, system:string, messages:Message[], signal:AbortSignal, budget?: {tokens:number;output:number}):Promise<string> {
+    // Compatibility endpoints only receive their supported role/content fields.
+    messages=messages.map(m=>({role:m.role,content:[m.content,...(m.toolCalls||[]).map(call=>`Tool call ${call.name}: ${JSON.stringify(call.arguments)}`),...(m.toolResult?[`Tool result ${m.toolResult.name} (${m.toolResult.status}): ${m.toolResult.output}`]:[])].filter(Boolean).join('\n')}));
     let result:any;
     if(this.p.kind==='anthropic') { result=await this.request('/messages',{model,system,max_tokens:budget?.output||4096,messages},signal); if(result.stop_reason==='max_tokens')throw new Error('The model response reached the output limit. Request a smaller change.');const text=result.content?.filter((x:any)=>x.type==='text').map((x:any)=>x.text).join('\n');if(!text)throw new Error('Anthropic returned no text.');return text; }
     if(this.p.kind==='gemini') { result=await this.request(`/models/${encodeURIComponent(model)}:generateContent`,{generationConfig:{maxOutputTokens:budget?.output||4096},systemInstruction:{parts:[{text:system}]},contents:messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))},signal); if(result.candidates?.[0]?.finishReason==='MAX_TOKENS')throw new Error('The model response reached the output limit. Request a smaller change.');const text=result.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('\n'); if(!text) throw new Error('Gemini não retornou texto.'); return text; }

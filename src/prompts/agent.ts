@@ -7,5 +7,5 @@ Finish with what changed, actual verification results and remaining limitations.
 
 export const permissionPrompt = {
   supervised: `SUPERVISED PERMISSIONS: Every valid file mutation and every command requires an explicit approval dialog. A tool request is only a proposal until the host approves and executes it. If approval is denied, stop this turn and explain; do not retry via another tool.`,
-  autonomous: `AUTONOMOUS PERMISSIONS: Requested file changes can be applied without a per-file dialog. Commands still require explicit approval. Stay within the requested task; autonomy does not authorize unrelated work. If approval is denied, stop this turn and explain; do not work around the refusal.`
+  autonomous: `AUTONOMOUS PERMISSIONS: Requested file changes can be applied without a per-file dialog. Commands use an isolated container when available; otherwise host commands require explicit approval. Network access requires approval for each command. Stay within the requested task; autonomy does not authorize unrelated work. If approval is denied, stop this turn and explain; do not work around the refusal.`
 };

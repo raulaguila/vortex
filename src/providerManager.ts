@@ -1,20 +1,21 @@
 import {randomUUID} from 'node:crypto';
 import {Client, Provider, validateUrl} from './providers';
-import {Catalog, ModelRef, Preferences, ProviderInput, SettingsState, sameModel, ChatMode, ConversationPreferences, defaultConversation, ModelLimits} from './protocol';
+import {Catalog, ModelRef, Preferences, ProviderInput, SettingsState, sameModel, ChatMode, ConversationPreferences, defaultConversation, ModelLimits,ExecutionPreferences,defaultExecution} from './protocol';
 
 export interface Store { get<T>(key: string, fallback: T): T; update(key: string, value: unknown): Thenable<void> | Promise<void> }
 export interface Secrets { get(key: string): Thenable<string | undefined> | Promise<string | undefined>; store(key: string, value: string): Thenable<void> | Promise<void>; delete(key: string): Thenable<void> | Promise<void> }
-const emptyPreferences = (): Preferences => ({selected: null, favorites: [], manualModels: [], defaults: {ask: null, plan: null, agent: null}, conversation: defaultConversation(), context: {}});
+const emptyPreferences = (): Preferences => ({selected: null, favorites: [], manualModels: [], defaults: {ask: null, plan: null, agent: null}, conversation: defaultConversation(), context: {},execution:defaultExecution()});
 export class ProviderManager {
   private prefsCache?: Preferences;
   private providersCache?: Provider[];
   private connectionRevisions = new Map<string,number>();
   private limitVersions = new Map<string, number>();
   private limits = new Map<string, ModelLimits>();
+  private unsupportedTools=new Set<string>();
   private catalogs = new Map<string, Catalog>();
   private versions = new Map<string, number>();
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(private storage: Store, private secrets: Secrets, private transport: typeof fetch = fetch) {}
+  constructor(private storage: Store, private secrets: Secrets, private transport?: typeof fetch) {}
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.queue.then(operation); this.queue = pending.catch(() => undefined); return pending;
   }
@@ -36,6 +37,7 @@ export class ProviderManager {
   async applyMode(mode: ChatMode): Promise<void> {
     return this.serial(async () => { const prefs = this.preferences(); const model = prefs.defaults[mode]; if(model && this.providers().some(p => p.id === model.providerId)) await this.persistPreferences( {...prefs, selected: model}); });
   }
+  async setExecution(execution:ExecutionPreferences){await this.serial(async()=>{await this.persistPreferences({...this.preferences(),execution});});}
   async setConversation(patch: Partial<ConversationPreferences>): Promise<void> {
     return this.serial(async () => { const prefs = this.preferences(); await this.persistPreferences( {...prefs, conversation: {...prefs.conversation, ...patch}}); });
   }
@@ -47,7 +49,7 @@ export class ProviderManager {
     const preferences=this.preferences(), selected=preferences.selected;
     const refs=[...preferences.manualModels,...(selected?[selected]:[]),...providers.flatMap(p=>p.catalog.models.map(modelId=>({providerId:p.id,modelId}))),...Array.from(this.limits.keys(),key=>{const [providerId,modelId]=JSON.parse(key);return {providerId,modelId};})];
     const contextBudgets=Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.contextBudget(ref)]));
-    return {selectedContext:selected?{model:selected,...this.contextBudget(selected)}:null,contextBudgets,limits:Object.fromEntries(this.limits),providers,preferences};
+    return {effectiveProtocols:Object.fromEntries(refs.map(ref=>[JSON.stringify([ref.providerId,ref.modelId]),this.toolProtocol(ref)])),selectedContext:selected?{model:selected,...this.contextBudget(selected)}:null,contextBudgets,limits:Object.fromEntries(this.limits),providers,preferences};
   }
 
   async inspect(model: ModelRef, signal?: AbortSignal): Promise<ModelLimits> {
@@ -76,6 +78,19 @@ export class ProviderManager {
     const tokens=Math.min(chosen,limit?.input||chosen);
     return {tokens,output:Math.min(4096,limit?.output||4096,Math.floor(tokens/4)),source:config?.source==='custom'?'custom':limit?.input?'api':'fallback'};
   }
+  toolProtocol(model:ModelRef):'native'|'compatibility' {
+    const key=JSON.stringify([model.providerId,model.modelId]);
+    const chosen=this.preferences().toolProtocols?.[key]||'auto';
+    if(chosen!=='auto')return chosen;
+    if(this.unsupportedTools.has(key))return 'compatibility';
+    const supported=this.limits.get(key)?.tools;
+    if(supported!==undefined)return supported?'native':'compatibility';
+    return ['openai','anthropic','gemini'].includes(this.find(model.providerId).kind)?'native':'compatibility';
+  }
+  fallbackTools(model:ModelRef):boolean{const key=JSON.stringify([model.providerId,model.modelId]);if((this.preferences().toolProtocols?.[key]||'auto')!=='auto')return false;this.unsupportedTools.add(key);return true;}
+  async setToolProtocol(model:ModelRef,protocol:'auto'|'native'|'compatibility') {
+    await this.serial(async()=>{this.find(model.providerId);this.unsupportedTools.delete(JSON.stringify([model.providerId,model.modelId]));const p=this.preferences();await this.persistPreferences({...p,toolProtocols:{...p.toolProtocols,[JSON.stringify([model.providerId,model.modelId])]:protocol}});});
+  }
   async client(id: string): Promise<Client> { const p = this.find(id); return new Client(p, await this.secrets.get('key:' + id) || '', this.transport); }
   private async resolve(input: ProviderInput): Promise<{provider: Provider; key: string}> {
     const existing = input.id ? this.find(input.id) : undefined;
@@ -98,6 +113,7 @@ export class ProviderManager {
       catch (error) { if (oldKey === undefined) await this.secrets.delete('key:' + provider.id); else await this.secrets.store('key:' + provider.id, oldKey); throw error; }
       this.connectionRevisions.set(provider.id,(this.connectionRevisions.get(provider.id)||0)+1);
       this.versions.set(provider.id, (this.versions.get(provider.id) || 0) + 1);
+      for(const key of this.unsupportedTools)if(JSON.parse(key)[0]===provider.id)this.unsupportedTools.delete(key);
       this.catalogs.delete(provider.id); for(const key of this.limits.keys()) if(JSON.parse(key)[0] === provider.id) this.limits.delete(key); return provider.id;
     });
   }
@@ -109,7 +125,7 @@ export class ProviderManager {
       for(const key of this.limits.keys())if(JSON.parse(key)[0]===id)this.limits.delete(key);
       this.versions.set(id, (this.versions.get(id) || 0) + 1); this.catalogs.delete(id);
       const prefs = this.preferences();
-      await this.persistPreferences( {...prefs, context: Object.fromEntries(Object.entries(prefs.context).filter(([key]) => JSON.parse(key)[0] !== id)), defaults: Object.fromEntries(Object.entries(prefs.defaults).map(([mode, model]) => [mode, model?.providerId === id ? null : model])) as Preferences['defaults'], selected: prefs.selected?.providerId === id ? null : prefs.selected, favorites: prefs.favorites.filter(m => m.providerId !== id), manualModels: prefs.manualModels.filter(m => m.providerId !== id)});
+      await this.persistPreferences( {...prefs, toolProtocols:Object.fromEntries(Object.entries(prefs.toolProtocols||{}).filter(([key])=>JSON.parse(key)[0]!==id)), context: Object.fromEntries(Object.entries(prefs.context).filter(([key]) => JSON.parse(key)[0] !== id)), defaults: Object.fromEntries(Object.entries(prefs.defaults).map(([mode, model]) => [mode, model?.providerId === id ? null : model])) as Preferences['defaults'], selected: prefs.selected?.providerId === id ? null : prefs.selected, favorites: prefs.favorites.filter(m => m.providerId !== id), manualModels: prefs.manualModels.filter(m => m.providerId !== id)});
       await this.secrets.delete('key:' + id);
     });
   }

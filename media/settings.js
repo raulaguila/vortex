@@ -40,7 +40,10 @@ function renderModels() {
       const star = create('button', 'favorite-button' + (favorite ? ' active' : ''), favorite ? '★' : '☆');
       star.dataset.focus = 'star:' + modelKey(ref) + ':' + subtitle; star.setAttribute('aria-pressed', String(favorite)); star.setAttribute('aria-label', `${favorite ? 'Desfavoritar' : 'Favoritar'} ${ref.modelId}`);
       star.onclick = () => request('favoriteModel', {model:ref, favorite:!favorite});
-      line.append(choice, star); container.append(line); count++;
+      const protocol=create('select','tool-protocol');protocol.setAttribute('aria-label','Tool protocol · '+ref.modelId);protocol.dataset.focus='protocol:'+modelKey(ref)+':'+subtitle;
+      for(const [value,label] of [['auto','Auto'],['native','Native tools'],['compatibility','Compatibility']]){const option=create('option','',label);option.value=value;protocol.append(option);}
+      protocol.value=state.preferences.toolProtocols?.[modelKey(ref)]||'auto';protocol.title='Effective protocol: '+(state.effectiveProtocols?.[modelKey(ref)]||'compatibility');protocol.disabled=busy;protocol.onchange=()=>request('setToolProtocol',{model:ref,protocol:protocol.value});
+      line.append(choice, protocol, star); container.append(line); count++;
     }
     const favorites = state.preferences.favorites.filter(ref => { const p = state.providers.find(p => p.id === ref.providerId); return p && `${ref.modelId} ${p.name}`.toLocaleLowerCase().includes(query); });
     if(favorites.length) { container.append(create('h3', 'model-group', 'Favoritos')); favorites.forEach(ref => row(ref, state.providers.find(p => p.id === ref.providerId).name)); }
@@ -170,3 +173,14 @@ $('context-model').onchange=()=>{renderContext(true);const model=contextRef();if
 $('inspect-context').onclick=()=>{const model=contextRef();if(model)request('modelInfo',{model});};
 $('context-source').onchange=()=>{const api=$('context-source').value==='api';$('context-tokens').disabled=api;if(api){const ref=contextRef();$('context-tokens').value=state.limits?.[ref?modelKey(ref):'']?.input||16384;}};
 $('save-context').onclick=()=>{const model=contextRef();if(!model||!$('context-tokens').reportValidity())return;request('setContext',{model,source:$('context-source').value,tokens:Number($('context-tokens').value)});};
+
+const executionForm=create('form','execution-settings');executionForm.append(create('h2','','Execution limits'));
+for(const [name,label,value,min,max] of [['maxSteps','Steps per turn',20,1,200],['commandTimeout','Command timeout (seconds)',60,1,3600],['taskTimeout','Task timeout (seconds)',1800,1,86400],['tokenBudget','Token budget (empty = unlimited)','',1024,100000000]]){
+ const labelEl=create('label','',label),input=create('input');input.type='number';input.min=min;input.max=max;input.value=value;input.name=name;if(name!=='tokenBudget')input.required=true;labelEl.append(input);executionForm.append(labelEl);
+}
+const saveExecution=create('button','','Save execution limits');saveExecution.type='submit';executionForm.append(saveExecution);$('section-conversation').append(executionForm);
+executionForm.onsubmit=e=>{e.preventDefault();const values=Object.fromEntries([...executionForm.elements].filter(e=>e.name).map(e=>[e.name,e.value===''?null:Number(e.value)]));request('setExecution',{execution:values});};
+window.addEventListener('message',({data:m})=>{if(m.type==='state'&&m.state.preferences.execution&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});
+
+const sandboxSection=create('section','execution-settings');sandboxSection.append(create('h2','','Isolated commands'),create('p','','Autonomous commands use a local Docker container. Without Docker, commands require host approval. Network is off by default.'));
+const setupSandbox=create('button','','Download sandbox image');setupSandbox.onclick=()=>request('setupSandbox');sandboxSection.append(setupSandbox);$('section-conversation').append(sandboxSection);

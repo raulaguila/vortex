@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 .PHONY: help install build watch test test-ui test-tls test-host check package install-vsix icons
 help:
-	@echo "install build watch test test-ui test-tls test-host check package install-vsix icons"
+	@echo "install build watch typecheck test test-ui test-tls test-host test-sandbox test-real check package install-vsix icons"
 icons:
 	npm run icons
 install:
@@ -23,3 +23,13 @@ package:
 	npm run package
 install-vsix: package
 	code --install-extension vortex-agent.vsix --force
+
+.PHONY: typecheck test-real
+typecheck:
+	npm run typecheck
+test-real:
+	npm run test:real
+
+.PHONY: test-sandbox
+test-sandbox:
+	npm run test:sandbox

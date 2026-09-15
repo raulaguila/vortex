@@ -4,6 +4,11 @@ import {readFileSync} from 'node:fs';
 import {AgentController} from './agent';
 import {ProviderManager} from './providerManager';
 import {parseRequest, Request, Response} from './protocol';
+import {execFile} from 'node:child_process';
+import {Sandbox} from './sandbox';
+import {Attachments} from './attachments';
+import {ChangeStore} from './changes';
+import {ReviewService} from './review';
 import {SessionStore} from './sessions';
 import {renderSidebar} from './view';
 
@@ -21,22 +26,40 @@ class VortexController implements vscode.WebviewViewProvider {
   private providers: ProviderManager;
   private agent: AgentController;
   private sessions: SessionStore;
+  private attachments=new Attachments();
   private snapshotVersion = 0;
   private initialized = false;
   private restored?:Promise<void>;
   private routes = new Map<string, Surface>();
   private settingsSection: 'providers' | 'models' | 'conversation' = 'providers';
   constructor(private ctx: vscode.ExtensionContext) {
-    this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'sessions').fsPath);
+    this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    const output=vscode.window.createOutputChannel('Vortex');ctx.subscriptions.push(output);
+    const diagnostics:string[]=[];const log=(record:Record<string,unknown>)=>{const line=JSON.stringify({time:new Date().toISOString(),...record});diagnostics.push(line);if(diagnostics.length>1000)diagnostics.shift();output.appendLine(line);};
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.diagnostics',()=>output.show()),vscode.commands.registerCommand('vortex.exportDiagnostics',async()=>{const doc=await vscode.workspace.openTextDocument({language:'jsonl',content:diagnostics.join('\n')});await vscode.window.showTextDocument(doc);}));
+    void Sandbox.recover(vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath).catch(()=>log({event:'sandboxRecovery',status:'failed'}));
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.setupSandbox',async()=>{
+      const available=await new Sandbox().available();if(!available){void vscode.window.showInformationMessage('Install and start a local Docker runtime first. Host commands remain supervised.');return;}
+      const image=await vscode.window.showInputBox({title:'Download sandbox image',value:vscode.workspace.getConfiguration('vortex').get<string>('sandbox.image')||'node:22-bookworm-slim',validateInput:value=>/^[a-zA-Z0-9][a-zA-Z0-9./_:@-]{0,250}$/.test(value)?undefined:'Invalid image reference'});if(!image)return;
+      await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Vortex — Downloading sandbox image'},()=>new Promise<void>((resolve,reject)=>execFile('docker',['pull',image],{timeout:300000,maxBuffer:1024*1024},error=>error?reject(new Error('Image download failed. Check Docker and network access.')):resolve())));
+      await vscode.workspace.getConfiguration('vortex').update('sandbox.image',image,vscode.ConfigurationTarget.Global);
+    }));
+    const reviews=new ReviewService(new ChangeStore(vscode.Uri.joinPath(ctx.globalStorageUri,'changes').fsPath));ctx.subscriptions.push(reviews);
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.agent.reviewChanges()),vscode.commands.registerCommand('vortex.undoChanges',()=>this.agent.undoChanges()));
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',async(uri?:vscode.Uri)=>{await this.attachments.choose(uri);this.attachmentState();}));
     this.providers = new ProviderManager(ctx.globalState, ctx.secrets);
     this.agent = new AgentController(this.providers, message => {
+      if(message.type==='toolProgress')log({id:message.id,tool:message.name,status:message.status,elapsed:message.elapsed});
+      if(message.type==='runEnd')log({id:message.requestId,status:message.status});
       if(message.type==='context')void this.state().catch(()=>undefined);
+      if(message.type==='accepted'){this.attachments.consume();this.attachmentState();}
       if(message.type==='accepted'||message.type==='history')void ctx.workspaceState.update('activeSession',this.agent.activeSessionId);
       if(message.type === 'accepted' || message.type === 'runEnd') {
         const target = this.routes.get(message.requestId); if(target) this.post(target, message);
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
-    }, this.sessions);
+    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath);
   }
+  private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
   dispose() { this.agent.dispose(); this.panel?.dispose(); }
   private post(target: Surface, data: Response) { if(!target.disposed) void target.webview.postMessage(data); }
   private async state() {
@@ -80,7 +103,11 @@ class VortexController implements vscode.WebviewViewProvider {
   private async handle(target: Surface, msg: Request): Promise<void> {
     const success = (message?: string, providerId?: string) => this.post(target,{type:'result',requestId:msg.requestId,ok:true,message,providerId});
     switch(msg.type) {
+      case 'setupSandbox':await vscode.commands.executeCommand('vortex.setupSandbox');success();return;
+      case 'attachContext':await this.attachments.choose();this.attachmentState();success();return;
+      case 'removeContext':this.attachments.remove(msg.id);this.attachmentState();success();return;
       case 'ready':
+        this.attachmentState();
         await this.providers.migrateSelection(msg.legacySelection); await this.state();
         if(!this.restored)this.restored=(async()=>{
           const id=this.ctx.workspaceState.get<string>('activeSession');
@@ -94,11 +121,18 @@ class VortexController implements vscode.WebviewViewProvider {
         return;
       case 'copyText': await vscode.env.clipboard.writeText(msg.text);success();return;
       case 'openLink': await vscode.env.openExternal(vscode.Uri.parse(msg.url));return;
-      case 'listSessions': this.post(target,{type:'sessions',sessions:await this.sessions.list(msg.query),requestId:msg.requestId});return;
+      case 'listSessions': {const rows=await this.sessions.list(msg.query,msg.offset||0,51);this.post(target,{type:'sessions',sessions:rows.slice(0,50),requestId:msg.requestId,offset:msg.offset||0,hasMore:rows.length>50});return;}
       case 'loadSession': await this.agent.load(msg.id); return;
       case 'deleteSession': await this.agent.removeSession(msg.id);success();return;
       case 'refreshAllModels': await Promise.all(this.providers.providers().map(p=>this.providers.refresh(p.id,msg.requestId+':'+p.id,()=>this.state())));success();return;
       case 'modelInfo': await this.providers.inspect(msg.model);await this.state();success();return;
+      case 'resume':case 'implementPlan':
+        if(target.kind!=='chat')throw new Error('Use the conversation to continue.');this.routes.set(msg.requestId,target);
+        try{await this.agent.resume(msg.requestId,msg.type==='implementPlan');}finally{this.routes.delete(msg.requestId);}success();return;
+      case 'reviewChanges':await this.agent.reviewChanges();success();return;
+      case 'undoChanges':await this.agent.undoChanges();success();return;
+      case 'setExecution':await this.providers.setExecution(msg.execution);break;
+      case 'setToolProtocol': if(this.agent.busy)throw new Error('Stop the task before changing tool protocol.');await this.providers.setToolProtocol(msg.model,msg.protocol);break;
       case 'setContext': await this.providers.setContext(msg.model,msg.source,msg.tokens);break;
       case 'openSettings': this.openSettings(msg.section); success(); return;
       case 'stop': this.agent.stop(); return;
@@ -108,7 +142,7 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'start':
         if(target.kind !== 'chat') throw new Error('Inicie a tarefa pela conversa.');
         this.routes.set(msg.requestId,target);
-        try { await this.agent.start(msg); } finally { this.routes.delete(msg.requestId); }
+        try { const attached=this.attachments.peek();await this.agent.start(msg,attached); } finally { this.routes.delete(msg.requestId); }
         return;
       case 'applyMode':
         if(this.agent.busy) throw new Error('Aguarde a tarefa terminar para trocar de modo.');

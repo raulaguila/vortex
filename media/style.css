@@ -245,3 +245,9 @@ article.assistant .message-content { padding:0; }
 .choice-trigger svg, .choice-option svg { width:16px; height:16px; }
 .favorite-button svg { width:15px; height:15px; }
 .favorite-button.active svg { fill:currentColor; }
+
+.task-actions{display:flex;gap:4px;flex-wrap:wrap;margin:0 16px 6px}.task-actions[hidden]{display:none}.task-actions button{font-size:11px;padding:3px 5px;color:var(--vscode-descriptionForeground);background:transparent;border:0}.task-actions button:hover{background:var(--vscode-toolbar-hoverBackground)}
+
+.attached-context{display:flex;gap:4px;flex-wrap:wrap}.context-chip{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+.composer-meta > button:first-child{font-size:11px;padding:1px 3px}

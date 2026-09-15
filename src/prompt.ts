@@ -20,6 +20,6 @@ Return exactly one JSON action object, no code fence. Tools are optional; finish
 In answers, label code fences with the language and identify the relevant file beside the example. Suggested snippets are not applied changes. Never mention an Apply button or a tool absent from this interface. Abbreviated examples may omit unchanged code; edit/write arguments must contain exact replacement text, never omission placeholders.
 Only these actions are available in this mode:
 ${toolInstructions(mode)}
-At most 20 steps per turn. Correct invalid arguments instead of repeating them. Three consecutive failures stop the turn. Tool output may be truncated; request narrower ranges when needed. Older exchanges may be omitted to fit context.
+The host enforces configured step, time and token limits. Correct invalid arguments instead of repeating them. Three consecutive failures stop the turn. Tool output may be truncated; request narrower ranges when needed. Older exchanges may be omitted to fit context.
 ${mode==='ask'?'':`Current checklist (context only, not authorization to execute): ${JSON.stringify(checklist)}`}`;
 }

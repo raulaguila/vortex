@@ -2,7 +2,7 @@
   "name": "vortex-agent",
   "displayName": "Vortex",
   "description": "Seu agente de código, seus modelos. BYOK para VS Code.",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "publisher": "vortex-local",
   "engines": {
     "vscode": "^1.96.0"
@@ -14,14 +14,17 @@
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "tsc -p . && esbuild media/vendor-entry.js --bundle --platform=browser --format=iife --minify --outfile=media/vendor.js && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --target=node20 --outfile=dist/extension.js",
-    "watch": "tsc -w -p .",
+    "watch": "node scripts/watch.cjs",
     "test": "npm run compile && node --test test/*.test.cjs",
     "vscode:prepublish": "npm run compile",
     "test:ui": "npm run compile && node test/ui.cjs",
     "test:host": "npm run compile && node test/extension-host.cjs",
     "test:tls": "npm run compile && node --test test/tls.cjs",
     "package": "npm run compile && vsce package --allow-missing-repository --skip-license --out vortex-agent.vsix",
-    "icons": "node scripts/update-icons.cjs"
+    "icons": "node scripts/update-icons.cjs",
+    "typecheck": "tsc -p . --noEmit",
+    "test:real": "npm run compile && node scripts/evaluate.cjs",
+    "test:sandbox": "npm run compile && node --test test/sandbox.cjs"
   },
   "activationEvents": [
     "onView:vortex.sidebar"
@@ -41,6 +44,30 @@
       {
         "command": "vortex.openSettings",
         "title": "Vortex: Abrir configurações"
+      },
+      {
+        "command": "vortex.reviewChanges",
+        "title": "Vortex: Review task changes"
+      },
+      {
+        "command": "vortex.undoChanges",
+        "title": "Vortex: Undo task changes"
+      },
+      {
+        "command": "vortex.attachContext",
+        "title": "Vortex: Add to context"
+      },
+      {
+        "command": "vortex.diagnostics",
+        "title": "Vortex: Show diagnostic log"
+      },
+      {
+        "command": "vortex.exportDiagnostics",
+        "title": "Vortex: Preview diagnostic export"
+      },
+      {
+        "command": "vortex.setupSandbox",
+        "title": "Vortex: Download sandbox image"
       }
     ],
     "viewsContainers": {
@@ -60,6 +87,30 @@
           "name": "Vortex"
         }
       ]
+    },
+    "configuration": {
+      "title": "Vortex",
+      "properties": {
+        "vortex.sandbox.image": {
+          "type": "string",
+          "default": "node:22-bookworm-slim",
+          "description": "Local Docker image for isolated commands. Pull or build it explicitly before use."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "vortex.attachContext",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "vortex.attachContext",
+          "group": "navigation"
+        }
+      ]
     }
   },
   "devDependencies": {
@@ -74,6 +125,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "diff": "9.0.0",
     "undici": "^6.28.1"
   },
   "license": "UNLICENSED",

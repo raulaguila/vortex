@@ -16,6 +16,15 @@ function harness(replies){
   const run=(prompt,mode='agent',permission='supervised')=>agent.start({type:'start',requestId:'test',prompt,mode,permission,model:{providerId:'p',modelId:'m'}});
   return {agent,events,calls,tools,run};
 }
+test('execution token budget stops before an unaffordable provider request',async()=>{
+ const h=harness([{action:'read',path:'a'}]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:20,commandTimeout:60,taskTimeout:1800,tokenBudget:100}});
+ await h.run('Read the project');assert.equal(h.calls.length,0);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'stopped');
+});
+test('tool limit bounds a native batch without replaying unexecuted calls',async()=>{
+ const h=harness([]);h.agent.providers.preferences=()=>({conversation:{language:'auto'},execution:{maxSteps:1,commandTimeout:60,taskTimeout:1800,tokenBudget:null}});
+ h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'read',arguments:{path:'b'}}]})});
+ await h.run('Read the project');assert.equal(h.tools.length,1);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.messages.filter(m=>m.toolResult).length,2);
+});
 test('social guard matches full messages and preserves actual tasks and continuations',()=>{
   for(const text of ['oi','Oi!','Olá, Vortex! Tudo bem?','hello','thanks','boa noite','hola'])assert.equal(isSocialMessage(text),true,text);
   for(const text of ['Oi, corrija o login','hello, read README.md','continue','sim','implemente o plano','obrigado, agora rode os testes'])assert.equal(isSocialMessage(text),false,text);
@@ -108,4 +117,21 @@ test('run is locked while credentials resolve and Stop prevents the first provid
  const first=h.run('Read a file');assert.equal(h.agent.busy,true);
  await assert.rejects(h.run('Another task'),/execução/);h.agent.stop();unlock({chat:async()=>{throw new Error('must not call');}});
  await first;assert.equal(h.events.at(-1).status,'stopped');
+});
+
+test('native calls execute sequentially and retain matching result IDs',async()=>{
+ const h=harness([]);let count=0;const requests=[];
+ h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async(_model,_system,messages)=>{requests.push(structuredClone(messages));return ++count===1?{text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'read',arguments:{path:'b'}}]}:{text:'Done',calls:[]};}});
+ await h.run('Read a and b','ask');assert.equal(h.tools.length,2);assert.deepEqual(requests[1].filter(m=>m.toolResult).map(m=>m.toolResult.id),['a','b']);assert.equal(h.events.at(-1).status,'complete');
+});
+test('native batch validation prevents any effects when one call is unauthorized',async()=>{
+ const h=harness([]);h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'write',arguments:{path:'a',content:'bad'}}]})});
+ await h.run('Review a','ask');assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'error');
+});
+test('cancel during a native batch stops remaining calls and closes the transcript',async()=>{
+ const h=harness([]);let tools=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read',arguments:{path:'a'}},{id:'b',name:'read',arguments:{path:'b'}}]})});
+ h.agent.execute=async()=>{tools++;h.agent.stop();return 'read';};await h.run('Read a and b');assert.equal(tools,1);assert.equal(h.events.at(-1).status,'stopped');assert.equal(h.agent.messages.filter(m=>m.toolResult).length,2);
 });

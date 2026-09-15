@@ -10,9 +10,10 @@ export type Action =
   | {action:'plan';items:ChecklistItem[]}
   | {action:'write';path:string;content:string}
   | {action:'edit';path:string;oldText:string;newText:string}
-  | {action:'command';command:string};
+  | {action:'remove';path:string}
+  | {action:'command';command:string;network?:boolean};
 
-const catalog: Record<Action['action'],string> = {
+export const catalog: Record<Action['action'],string> = {
   finish:'{"action":"finish","text":"Markdown answer"}',
   list:'{"action":"list","pattern":"src/**"} — optional glob; at most 500 paths.',
   read:'{"action":"read","path":"src/file.ts","startLine":1,"endLine":200} — literal path; at most 400 numbered lines, file at most 1 MB.',
@@ -21,12 +22,13 @@ const catalog: Record<Action['action'],string> = {
   plan:'{"action":"plan","items":[{"id":"step-1","text":"Concrete step","status":"pending"}]} — full checklist, 1–50 unique IDs; statuses pending, running, done. Preserve IDs on updates.',
   write:'{"action":"write","path":"src/file.ts","content":"complete replacement"} — create or replace a file, at most 200 KB of text.',
   edit:'{"action":"edit","path":"src/file.ts","oldText":"unique exact match","newText":"replacement"} — oldText must occur exactly once.',
-  command:'{"action":"command","command":"npm test"} — workspace shell; approval required, 60-second timeout. A nonzero exit is a failure.'
+  remove:'{"action":"remove","path":"src/file.ts"} — remove one existing text file. Directories are forbidden; preserve unrelated user work.',
+  command:'{"action":"command","command":"npm test"} — workspace shell; host execution requires approval. Autonomous execution uses an isolated container when available. Optional network:true requires approval. Timeout is configured by the user. A nonzero exit is a failure.'
 };
 export function allowedActions(mode:Mode,conversationOnly=false):Action['action'][] {
   if(!isMode(mode))throw new Error('Invalid mode.');
   if(conversationOnly)return ['finish'];
-  return ['finish','list','read','search','diagnostics',...(mode==='ask'?[]:['plan' as const]),...(canWrite(mode)?['write','edit','command'] as const:[])];
+  return ['finish','list','read','search','diagnostics',...(mode==='ask'?[]:['plan' as const]),...(canWrite(mode)?['write','edit','remove','command'] as const:[])];
 }
 export function toolInstructions(mode:Mode):string {return allowedActions(mode).map(name=>catalog[name]).join('\n');}
 const text=(v:unknown,max:number,empty=false):v is string=>typeof v==='string'&&v.length<=max&&(empty||!!v.trim());
@@ -35,6 +37,8 @@ export function validateAction(value:unknown,mode:Mode,conversationOnly=false):A
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Expected one JSON action object.');
   const a=value as Record<string,unknown>;
   if(!allowedActions(mode,conversationOnly).includes(a.action as Action['action']))throw new Error(`Action not allowed in ${conversationOnly?'conversation':mode} mode.`);
+  const properties=schemas[a.action as Action['action']];
+  if(Object.keys(a).some(key=>key!=='action'&&!Object.hasOwn(properties,key)))throw new Error('Unknown tool argument.');
   let valid=false;
   switch(a.action){
     case 'finish':valid=text(a.text,100000);break;
@@ -42,13 +46,27 @@ export function validateAction(value:unknown,mode:Mode,conversationOnly=false):A
     case 'read':valid=literal(a.path)&&[a.startLine,a.endLine].every(n=>n===undefined||Number.isSafeInteger(n)&&Number(n)>0)&&(a.endLine===undefined||Number(a.endLine)>=Number(a.startLine??1));break;
     case 'search':valid=text(a.query,300)&&(a.pattern===undefined||text(a.pattern,500));break;
     case 'diagnostics':valid=true;break;
+    case 'remove':valid=literal(a.path);break;
     case 'write':valid=literal(a.path)&&text(a.content,200000,true);break;
     case 'edit':valid=literal(a.path)&&text(a.oldText,200000)&&text(a.newText,200000,true);break;
-    case 'command':valid=text(a.command,20000);break;
+    case 'command':valid=text(a.command,20000)&&(a.network===undefined||typeof a.network==='boolean');break;
     case 'plan':valid=Array.isArray(a.items)&&a.items.length>0&&a.items.length<=50&&a.items.every(i=>i&&text(i.id,80)&&text(i.text,300)&&['pending','running','done'].includes(i.status))&&new Set(a.items.map(i=>i.id)).size===a.items.length;break;
   }
   if(!valid)throw new Error(`Invalid ${String(a.action)} arguments. Use the documented schema; file paths must be literal, not globs.`);
   return value as Action;
 }
 
-export class ApprovalDenied extends Error {constructor(){super('Approval denied. The turn stopped without executing the refused action.');}}
+export class ApprovalDenied extends Error {constructor(message='Approval denied. The turn stopped without executing the refused action.'){super(message);}}
+
+// The same schemas feed native providers and validate the textual fallback.
+export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
+const str = {type:'string'};
+const schemas: Record<Action['action'], Record<string,unknown>> = {
+ remove:{path:str},finish:{text:str}, list:{pattern:str}, read:{path:str,startLine:{type:'integer',minimum:1},endLine:{type:'integer',minimum:1}},
+ search:{query:str,pattern:str}, diagnostics:{}, write:{path:str,content:str}, edit:{path:str,oldText:str,newText:str}, command:{command:str,network:{type:'boolean'}},
+ plan:{items:{type:'array',minItems:1,maxItems:50,items:{type:'object',properties:{id:str,text:str,status:{type:'string',enum:['pending','running','done']}},required:['id','text','status'],additionalProperties:false}}}
+};
+const optional:Record<string,string[]>={command:['network'],list:['pattern'],read:['startLine','endLine'],search:['pattern']};
+export function toolDefinitions(mode:Mode,conversationOnly=false):ToolDefinition[]{
+ return allowedActions(mode,conversationOnly).filter(name=>name!=='finish').map(name=>({name,description:catalog[name].split(' — ').slice(1).join(' — ')||name,parameters:{type:'object',properties:schemas[name],required:Object.keys(schemas[name]).filter(key=>!optional[name]?.includes(key)),additionalProperties:false}}));
+}
