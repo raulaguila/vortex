@@ -16,6 +16,12 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.8.1
+
+O contexto do editor agora informa explicitamente que cobre somente documentos abertos, sem representar o diretório inteiro ou o conteúdo dos arquivos. Os prompts de Ask, Plan e Agent orientam a usar listagem e leitura para descrever um projeto. A listagem informa escopo, padrão, exclusões e paginação.
+
+Validação: 162 testes automatizados passaram, incluindo um workspace com três arquivos e apenas package.json aberto. Provedores simulados; isso não comprova a aderência de todos os modelos reais às instruções.
+
 ## Versão 0.8.0
 
 - O chat, o teste de ferramentas e as avaliações usam o mesmo motor, com validação, recuperação e limites consistentes.

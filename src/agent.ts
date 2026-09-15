@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ApprovalDenied,validateAction } from './actions';
 import { runCommand } from './command';
-import { EditorContext } from './editorContext';
+import { EditorContext,editorContextCoverage } from './editorContext';
 import { ExecutionError } from './execution';
 import { FileSnapshot,snapshotFile,verifySnapshot } from './files';
 import { applyEdits } from './multiEdit';
@@ -39,7 +39,7 @@ export class AgentController extends AgentRuntime {
     if(a.action==='plan'||a.action==='readOutput')return super.execute(a,mode,root,signal,permission);
     if(a.action==='question'){this.event('assistant',a.text);return askQuestion(a.text,a.options,signal);}
     if(!root)throw new Error('Abra uma pasta no VS Code.');
-    if(a.action==='editor')return JSON.stringify(this.editor?await this.editor.snapshot(root,a.selection):{files:[],active:null,unavailable:true});
+    if(a.action==='editor')return JSON.stringify(this.editor?await this.editor.snapshot(root,a.selection):{...editorContextCoverage,files:[],active:null,unavailable:true});
     const readResult=await executeReadTool(a,root,signal,this.readVersions);if(readResult!==undefined)return readResult;
     if(a.action==='edit'||a.action==='multiEdit'){
       if(!canWrite(mode))throw new Error('Read-only mode.');

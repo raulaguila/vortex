@@ -24,7 +24,7 @@ export async function executeReadTool(a:Action,root:string,signal:AbortSignal,ve
  signal.throwIfAborted();
  if(a.action==='list'){
   const {files,capped}=await candidates(root,a.pattern),offset=a.offset||0,end=Math.min(files.length,offset+(a.limit||100));
-  return JSON.stringify({files:files.slice(offset,end),nextOffset:end<files.length?end:null,totalDiscovered:files.length,capped,excluded:exclude});
+  return JSON.stringify({scope:'workspace_files',pattern:a.pattern||'**/*',coverage:'Matching workspace paths only, subject to exclusions and pagination; file contents are not included.',files:files.slice(offset,end),nextOffset:end<files.length?end:null,totalDiscovered:files.length,capped,excluded:exclude});
  }
  if(a.action==='read'){
   const value=await textFile(root,a.path);signal.throwIfAborted();if(value.text.includes('\0'))throw new Error('Binary file.');
