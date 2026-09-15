@@ -59,6 +59,26 @@ export function allowedActions(mode:Mode,conversationOnly=false):Action['action'
  if(!isMode(mode))throw new Error('Invalid mode.');
  return conversationOnly?['finish']:(Object.keys(registry) as Action['action'][]).filter(name=>registry[name].modes.includes(mode));
 }
+const toolPurposes:Record<Exclude<Action['action'],'finish'>,string>={
+ list_files:'Discover workspace files by path or filename pattern.',
+ search_files:'Find text inside workspace files.',
+ read_file:"Read a specific file's contents.",
+ get_editor_context:'Inspect open documents and selected text. Open editor documents are not a complete workspace listing; metadata is not file content.',
+ get_diagnostics:'Inspect existing IDE errors and warnings; this does not run tests.',
+ query_symbols:'Find code symbols, definitions or references.',
+ read_tool_output:'Retrieve another page of a retained tool result.',
+ get_project_skill:'Discover or read project-specific skill instructions.',
+ ask_user:'Request missing information or a user decision, not execution approval.',
+ update_plan:'Create or update the visible implementation checklist.',
+ write_file:'Create or replace an entire text file.',
+ edit_file:'Replace one exact, unique text occurrence in a file.',
+ edit_file_batch:'Apply multiple exact replacements to one file atomically.',
+ delete_file:'Delete one file required by the task.',
+ run_command:'Run builds, tests or other necessary shell commands.'
+};
+export function toolSelectionInstructions(mode:Mode):string{
+ return allowedActions(mode).filter((name):name is Exclude<Action['action'],'finish'>=>name!=='finish').map(name=>'- '+name+': '+toolPurposes[name]).join('\n');
+}
 export function toolInstructions(mode:Mode):string{return allowedActions(mode).map(name=>catalog[name]).join('\n');}
 function argumentIssue(value:unknown,s:Schema,field='arguments'):string|undefined{
  if(s.type==='string'){

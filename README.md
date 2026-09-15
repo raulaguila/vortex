@@ -16,6 +16,10 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.9.2
+
+O prompt inclui um guia em tópicos para escolher ferramentas, filtrado pelo modo. O workflow descreve a sequência de investigação; schemas continuam definindo argumentos e limites. O guia distingue localizar caminhos (`list_files`) de buscar texto dentro dos arquivos (`search_files`).
+
 ## Versão 0.9.1
 
 Prompts reorganizados em identidade, tarefa, modo, fluxo, permissões e comunicação. Ask e Plan não recebem orientações de aprovação de escrita; Agent enfatiza convenções do projeto, preservação do trabalho do usuário e verificação. Checklist só é incluído no contexto quando existe e o modo o utiliza. As definições detalhadas das ferramentas continuam no catálogo. Veja os [exemplos completos](docs/system-prompts.md).

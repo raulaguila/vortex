@@ -36,7 +36,7 @@ test('new tool contracts validate filters, coordinates and checklist progress',(
  test('structured prompts keep modes isolated, social turns tool-free and context conditional',()=>{
   for(const mode of ['ask','plan','agent']){
    const prompt=systemPrompt(mode,'auto',[],false,'supervised','native');
-   assert.ok(prompt.length<3600,'Keep behavioral instructions compact');
+   assert.ok(prompt.replace(/<tool_selection>[\s\S]*?<\/tool_selection>/,'').length<3600,'Keep behavioral instructions compact');
    const blocks=['identity','task','mode','workflow','communication'];let previous=-1;
    for(const block of blocks){const index=prompt.indexOf('<'+block+'>');assert.ok(index>previous);previous=index;}
    assert.doesNotMatch(prompt,/<checklist>/);
@@ -49,3 +49,14 @@ test('new tool contracts validate filters, coordinates and checklist progress',(
   assert.doesNotMatch(systemPrompt('ask','en',items,false,'supervised','native'),/<checklist>/);
   assert.match(systemPrompt('agent','en',[],false,'supervised','native'),/If an action is denied, stop the turn/);
  });
+
+test('tool selection bullets exactly match the available tools in each mode and protocol',()=>{
+ for(const mode of ['ask','plan','agent'])for(const protocol of ['native','compatibility']){
+  const prompt=systemPrompt(mode,'auto',[],false,'supervised',protocol);
+  const guide=prompt.match(/<tool_selection>([\s\S]*?)<\/tool_selection>/)[1];
+  assert.deepEqual([...guide.matchAll(/^- (\w+):/gm)].map(m=>m[1]),allowedActions(mode).filter(n=>n!=='finish'));
+  assert.match(guide,/- search_files: Find text inside workspace files/);
+  assert.match(guide,/- list_files: Discover workspace files by path or filename pattern/);
+  assert.doesNotMatch(prompt.match(/<workflow>([\s\S]*?)<\/workflow>/)[1],/list_files|search_files|read_file/);
+ }
+});
