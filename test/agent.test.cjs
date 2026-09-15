@@ -235,3 +235,11 @@ test('Ask executes read-only editor calls even when the provider finish reason i
  h.agent.providers.client=async()=>new Client({id:'p',name:'Gateway',kind:'compatible',baseUrl:'http://gateway.test'},'',async(_url,options)=>{const body=JSON.parse(options.body);requests++;assert.ok(body.tools.some(t=>t.function.name==='editor'));return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:requests===1?{content:'',tool_calls:[{id:'open-files',type:'function',function:{name:'editor',arguments:'{}'}}]}:{content:'The open files were inspected.'}}]}),{headers:{'content-type':'application/json'}});});
  await h.run('What can you tell me about the open project?','ask');assert.equal(requests,2);assert.deepEqual(h.tools,[{action:'editor'}]);assert.equal(h.events.at(-1).status,'complete');assert.equal(h.agent.messages.find(m=>m.toolResult).toolResult.id,'open-files');
 });
+
+test('quoted false editor flag executes once as false and keeps the original native call',async()=>{
+ for(const native of [false,true]){
+  const h=harness([{action:'editor',selection:'false'},{action:'finish',text:'Open files inspected.'}]);
+  if(native){let n=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'compatible'}];h.agent.providers.client=async()=>({turn:async()=>++n===1?{kind:'tool_use',text:'',calls:[{id:'flag-call',name:'editor',arguments:{selection:'false'}}]}:{kind:'final',text:'Open files inspected.',calls:[]}});}
+  await h.run('Which files are open?','ask');assert.deepEqual(h.tools,[{action:'editor',selection:false}]);assert.equal(h.events.at(-1).status,'complete');assert.equal(h.events.filter(e=>e.event?.activity?.name==='modelValidation').length,0);if(native)assert.equal(h.agent.messages.find(m=>m.toolCalls?.length).toolCalls[0].arguments.selection,'false');
+ }
+});

@@ -16,6 +16,14 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.7.3
+
+Os argumentos booleanos das ferramentas aceitam `true`/`false`, `1`/`0`, `"true"`/`"false"`, `"1"`/`"0"` e `"on"`/`"off"`, sem distinguir maiúsculas e ignorando espaços externos. A conversão ocorre apenas nos campos declarados como booleanos, antes da validação de argumentos e permissões. Textos de arquivos, comandos e consultas permanecem intactos.
+
+Isso corrige `editor.selection: "false"`, que passa a executar como `false` sem uma rodada extra de recuperação. A chamada original continua no rastreio. Valores ambíguos são rejeitados; a descrição do editor explica que `selection` é uma opção, não o texto selecionado.
+
+Ver [validação da 0.7.3](docs/validation-0.7.3.md).
+
 ## Versão 0.7.2
 
 - Respostas rejeitadas recebem retorno específico por campo. Chamadas nativas mantêm os IDs originais e recebem um resultado de erro antes da próxima rodada; nenhum item de um lote rejeitado é executado.

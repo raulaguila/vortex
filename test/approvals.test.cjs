@@ -35,3 +35,11 @@ test('executor rejects forged permission values and aborts before any dialog',as
  await assert.rejects(agent.execute({action:'command',command:'unused'},'agent','/tmp',controller.signal,'supervised'));
  assert.equal(prompts,before);assert.equal(mutations,0);
 });
+
+test('normalized network flags preserve sandbox network approval',async()=>{
+ const {decodeAction}=require('../dist/actions');const agent=new AgentController({},()=>{},{});let executions=0,network;
+ agent.sandbox={available:async()=>true,execute:async(...args)=>{executions++;network=args[4];return {output:'ok',changes:[],artifacts:[]};}};
+ const before=prompts;
+ await assert.rejects(agent.execute(decodeAction({action:'command',command:'unused',network:'on'},'agent'),'agent',os.tmpdir(),new AbortController().signal,'autonomous'),/Approval denied/);assert.equal(prompts,before+1);assert.equal(executions,0);
+ await agent.execute(decodeAction({action:'command',command:'unused',network:'off'},'agent'),'agent',os.tmpdir(),new AbortController().signal,'autonomous');assert.equal(executions,1);assert.equal(network,false);assert.equal(prompts,before+1);
+});

@@ -44,3 +44,28 @@ test('native rejection feedback serializes matching tool errors for all provider
  }
  assert.throws(()=>turnActions({...turn,calls:[{id:'a',name:'read',arguments:'{"path":"a"}'}]},'ask'),/expected an object/);
 });
+
+test('editor selection accepts unambiguous provider spellings in both protocols',()=>{
+ const {decodeAction,validateAction}=require('../dist/actions');
+ for(const mode of ['ask','plan','agent'])for(const [raw,expected] of [['false',false],['true',true],[' FALSE ',false],[' True ',true],[0,false],[1,true],['0',false],['1',true],['off',false],['ON',true],[false,false],[true,true],[null,undefined]]){
+  const input={action:'editor',selection:raw},original=structuredClone(input);const expectedAction=expected===undefined?{action:'editor'}:{action:'editor',selection:expected};
+  assert.deepEqual(decodeAction(input,mode),expectedAction);assert.deepEqual(input,original);
+  const compatibility=compatibilityTurn(JSON.stringify(input),mode);assert.deepEqual(turnActions(compatibility,mode),[expectedAction]);
+  const native={kind:'tool_use',stopReason:'stop',text:'',calls:[{id:'editor-call',name:'editor',arguments:{selection:raw}}]};assert.deepEqual(turnActions(native,mode),[expectedAction]);assert.equal(native.calls[0].arguments.selection,raw);
+ }
+ assert.throws(()=>validateAction({action:'editor',selection:'false'},'ask'),/must be a boolean/);
+ for(const selection of [2,-1,'yes','no','null','selected text',{startLine:1},[],{}])assert.throws(()=>decodeAction({action:'editor',selection},'ask'),/Use \{"selection":true\}/);
+ assert.throws(()=>decodeAction({action:'editor',selection:'false',unexpected:true},'ask'),/unknown field/);
+ assert.deepEqual(decodeAction({action:'command',command:'echo test',network:'false'},'agent'),{action:'command',command:'echo test',network:false});
+ assert.throws(()=>decodeAction({action:'command',command:'echo test',network:false},'ask'),/not allowed/);
+ assert.throws(()=>decodeAction({action:'editor',selection:'false'},'agent',true),/not allowed/);
+});
+
+test('boolean parsing only applies to declared boolean arguments',()=>{
+ const {decodeAction,validateAction}=require('../dist/actions');
+ assert.deepEqual(decodeAction({action:'search',query:'false',pattern:'on',caseSensitive:0,regex:'off'},'ask'),{action:'search',query:'false',pattern:'on',caseSensitive:false,regex:false});
+ assert.deepEqual(decodeAction({action:'write',path:'off',content:'false'},'agent'),{action:'write',path:'off',content:'false'});
+ assert.throws(()=>decodeAction({action:'read',path:'a',startLine:'1'},'ask'),/must be an integer/);
+ assert.throws(()=>decodeAction({action:'command',command:'echo',network:'yes'},'agent'),/must be a boolean/);
+ assert.throws(()=>validateAction({action:'search',query:'text',regex:'off'},'ask'),/must be a boolean/);
+});

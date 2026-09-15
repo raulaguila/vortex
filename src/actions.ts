@@ -1,4 +1,5 @@
 import {Mode,isMode} from './policy';
+import {parseBoolean} from './boolean';
 import {ChecklistItem} from './protocol';
 
 export type Action =
@@ -33,7 +34,7 @@ export const registry:Record<Action['action'],Entry>={
  read:define('Read numbered lines from disk or an open buffer. Use the returned version and do not copy line-number prefixes into edits.',object({path:file,startLine:integer(1,10000000),endLine:integer(1,10000000)},['path']),{path:'src/file.ts',startLine:1,endLine:200},'read',modes,'Reading file'),
  search:define('Search a page of workspace files. Literal by default; regex and caseSensitive optional. Inspect coverage/nextOffset; no matches only describes the scanned page.',object({query:string('Text or regex',300,1),pattern:string('File glob',500,1),offset:integer(0,10000),caseSensitive:{type:'boolean'},regex:{type:'boolean'}},['query']),{query:'function',pattern:'src/**'},'read',modes,'Searching files'),
  diagnostics:define('Read current IDE diagnostics, optionally by file and severity. Does not run tests.',object({path:file,severity:{type:'string',enum:['error','warning','all']}},[]),{},'read',modes,'Checking diagnostics'),
- editor:define('Read-only: identify the last active code editor and open files. selection:true reads selected text. Never edits files or editor state. Use when the user refers to this file or their selection.',object({selection:{type:'boolean'}},[]),{selection:true},'read',modes,'Reading editor context'),
+ editor:define('Read-only: identify the last active code editor and open files. Omit arguments to inspect open files. Set selection:true only to include selected text; this flag is not text or cursor coordinates. Never edits files or editor state.',object({selection:{type:'boolean',description:'Optional flag: true includes selected text; false or omitted returns only open-file metadata. Use JSON booleans, not text or a selection range.'}},[]),{},'read',modes,'Reading editor context'),
  question:define('Pause this task for a necessary user decision. Ask one focused question, with optional choices. Do not ask permission for edits here; use the normal approval flow.',object({text:string('Question',1000,1),options:{type:'array',items:string('Choice',160,1),minItems:2,maxItems:5}},['text']),{text:'Which behavior do you want?',options:['Option A','Option B']},'interaction',modes,'Waiting for your answer'),
  readOutput:define('Read the next page of a stored tool result using its opaque output ID. Never guess IDs.',object({id:string('Output ID',36,1),offset:integer(0,10000000)},['id']),{id:'ID from a tool result',offset:0},'read',modes,'Reading tool output'),
  symbols:define('Query IDE language services: document symbols, definition or references at a 1-based line/character. Availability depends on the language extension.',object({path:file,operation:{type:'string',enum:['document','definition','references']},line:integer(1,10000000),character:integer(1,100000)},['path']),{path:'src/file.ts',operation:'document'},'read',modes,'Inspecting symbols'),
@@ -88,7 +89,7 @@ export function validateAction(value:unknown,mode:Mode,conversationOnly=false):A
  if(!allowedActions(mode,conversationOnly).includes(action as Action['action']))throw new Error('Action '+JSON.stringify(typeof action==='string'?action.slice(0,80):null)+' is not allowed in '+mode+' mode'+(conversationOnly?' for a social message':'')+'. Allowed actions: '+allowedActions(mode,conversationOnly).join(', ')+'.');
  const name=action as Action['action'];
  if((name==='command'&&!String(args.command||'').trim())||(name==='finish'&&!String(args.text||'').trim())||(name==='question'&&!String(args.text||'').trim()))throw new Error('Text cannot be empty.');
- const issue=argumentIssue(args,registry[name].schema);if(issue)throw new Error('Invalid '+name+' arguments: '+issue);
+ const issue=argumentIssue(args,registry[name].schema);if(issue)throw new Error('Invalid '+name+' arguments: '+issue+(name==='editor'&&typeof args.selection!=='boolean'&&Object.hasOwn(args,'selection')?' Use {"selection":true} to include selected text, or {} to list open files. Do not put selected text or cursor coordinates in selection.':''));
  for(const field of ['path','cwd'])if(typeof args[field]==='string'&&!literal(args[field] as string))throw new Error('Invalid '+name+' arguments: '+field+' must be a literal relative workspace path, without globs or parent traversal. Use list/search to discover file paths.');
  if(name==='read'&&Number(args.endLine??Infinity)<Number(args.startLine??1))throw new Error('Invalid line range.');
  if(name==='plan'&&new Set((args.items as ChecklistItem[]).map(i=>i.id)).size!==(args.items as ChecklistItem[]).length)throw new Error('Duplicate checklist IDs.');
@@ -96,6 +97,22 @@ export function validateAction(value:unknown,mode:Mode,conversationOnly=false):A
  if(name==='skill'&&args.name&&!/^[a-zA-Z0-9_-]+$/.test(String(args.name)))throw new Error('Invalid skill name.');
  if(name==='readOutput'&&!/^[a-f0-9-]{36}$/.test(String(args.id)))throw new Error('Invalid output ID.');
  return value as Action;
+}
+function normalizeBooleanFields(value:unknown,schema:Schema):unknown{
+ if(schema.type==='boolean')return parseBoolean(value)??value;
+ if(schema.type==='array'&&Array.isArray(value)&&schema.items)return value.map(item=>normalizeBooleanFields(item,schema.items!));
+ if(schema.type==='object'&&value&&typeof value==='object'&&!Array.isArray(value))return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,schema.properties&&Object.hasOwn(schema.properties,key)?normalizeBooleanFields(item,schema.properties[key]):item]));
+ return value;
+}
+/** Normalize provider spellings only for schema-declared booleans, then enforce the full contract. */
+export function decodeAction(value:unknown,mode:Mode,conversationOnly=false):Action{
+ if(!value||typeof value!=='object'||Array.isArray(value))return validateAction(value,mode,conversationOnly);
+ const {action,...args}=value as Record<string,unknown>;
+ if(!allowedActions(mode,conversationOnly).includes(action as Action['action']))return validateAction(value,mode,conversationOnly);
+ const name=action as Action['action'],normalized=normalizeBooleanFields(args,registry[name].schema) as Record<string,unknown>;
+ // An omitted selection flag reads metadata only; tolerate explicit null for this optional field.
+ if(name==='editor'&&normalized.selection===null)delete normalized.selection;
+ return validateAction({action,...normalized},mode,conversationOnly);
 }
 export class ApprovalDenied extends Error {constructor(message='Approval denied. The turn stopped without executing the refused action.'){super(message);}}
 export interface ToolDefinition {name:string;description:string;inputSchema:Record<string,unknown>}

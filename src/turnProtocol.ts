@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {Action,validateAction,toolDefinitions,allowedActions} from './actions';
+import {Action,validateAction,decodeAction,toolDefinitions,allowedActions} from './actions';
 import {decodeReply} from './reply';
 import {Mode} from './policy';
 import {Turn} from './native';
@@ -19,7 +19,7 @@ export function turnActions(turn:Turn,mode:Mode,conversationOnly=false):Action[]
  if(unavailable)throw new Error('Tool '+JSON.stringify(unavailable.name.slice(0,80))+' is not exposed in '+mode+' mode. Allowed tools: '+[...allowed].join(', ')+'. Return a direct answer when no tool is needed.');
  for(const call of turn.calls)if(!call.arguments||typeof call.arguments!=='object'||Array.isArray(call.arguments))throw new Error('Invalid '+call.name+' arguments: expected an object matching the tool schema.');
  // Validate the whole batch before executing anything, including its first read.
- return turn.calls.length?turn.calls.map(c=>validateAction({...c.arguments as object,action:c.name},mode,conversationOnly)):[validateAction({action:'finish',text:turn.text},mode,conversationOnly)];
+ return turn.calls.length?turn.calls.map(c=>decodeAction({...c.arguments as object,action:c.name},mode,conversationOnly)):[validateAction({action:'finish',text:turn.text},mode,conversationOnly)];
 }
 
 /** Rejected calls still need a response with the original call ID before another model turn. */

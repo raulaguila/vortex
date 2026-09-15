@@ -1,4 +1,4 @@
-import {Action,validateAction} from './actions';
+import {Action,validateAction,decodeAction} from './actions';
 import {Mode} from './policy';
 
 // Text replies can end a turn, but only a complete, validated JSON object can invoke a tool.
@@ -12,5 +12,5 @@ export function decodeReply(reply:string,mode:Mode,conversationOnly=false):Actio
     if(/^[{\[]/.test(raw)||/^```(?:json)?\s*[{\[]/i.test(raw))throw new Error('Incomplete JSON action. Return one complete action object.');
     return validateAction({action:'finish',text},mode,conversationOnly);
   }
-  return validateAction(parsed,mode,conversationOnly);
+  return decodeAction(parsed,mode,conversationOnly);
 }
