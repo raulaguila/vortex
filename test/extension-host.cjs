@@ -21,7 +21,7 @@ const root=path.resolve(__dirname,'..');
     if(req.url==='/api/tags'){res.end(JSON.stringify({models:[{name:'vortex-test-model'}]}));return;}
     if(req.url==='/api/chat'){
       if(/^Summarize/.test(payload.messages?.[0]?.content||'')){res.end(JSON.stringify({message:{content:'Earlier fixture actions are recorded in the saved history. Preserve the current request, mode and approvals.'}}));return;}
-      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];const action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read',path:'vortex-connection-probe.txt'}):scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];const action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read_file',path:'vortex-connection-probe.txt'}):scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
       if(payload.tools){const {action:name,...args}=action;res.end(JSON.stringify({done:true,done_reason:'stop',message:name==='finish'?{content:action.text}:{content:'',tool_calls:[{id:'call-'+Date.now(),function:{name,arguments:args}}]}}));}
       else res.end(JSON.stringify({message:{content:JSON.stringify(action)}}));return;
     }
@@ -50,33 +50,33 @@ const root=path.resolve(__dirname,'..');
     await settings.locator('#output-limit').fill('8000');await settings.locator('#save-models').click();await frame.waitForFunction(()=>window.testStates.some(s=>Object.values(s.preferences.outputTokens||{}).includes(8000)));
     await settings.locator('#nav-diagnostics').click();await settings.locator('#trace-location').filter({hasText:'last-flow.json'}).waitFor();const tracePath=await settings.locator('#trace-location').innerText();const flow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.ok(flow.turns.length);assert.ok(!flow.user_question.includes('Reply OK.'));await settings.locator('#open-trace').click();
     // A native editor call is read-only in Ask; invalid arguments receive a correlated correction.
-    scripted=[{action:'editor',selection:{startLine:1}},{action:'editor',selection:false},{action:'finish',text:'Editor recovery validated in Ask.'}];await frame.locator('#prompt').fill('Describe the files open in this workspace');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Editor recovery validated in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
-    const recoveredFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(recoveredFlow.turns.length,3);assert.equal(recoveredFlow.turns[0].response.stop_reason,'tool_use');assert.equal(recoveredFlow.turns[0].response.provider_stop_reason,'stop');assert.match(recoveredFlow.turns[0].response.validation_error,/selection must be a boolean/);assert.equal(recoveredFlow.turns[1].request.Messages.find(m=>m.role==='tool').tool_call_id,recoveredFlow.turns[0].response.tool_calls[0].id);assert.equal(recoveredFlow.turns[2].response.stop_reason,'stop');assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
+    scripted=[{action:'get_editor_context',include_selection:{start_line:1}},{action:'get_editor_context',include_selection:false},{action:'finish',text:'Editor recovery validated in Ask.'}];await frame.locator('#prompt').fill('Describe the files open in this workspace');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Editor recovery validated in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    const recoveredFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(recoveredFlow.turns.length,3);assert.equal(recoveredFlow.turns[0].response.stop_reason,'tool_use');assert.equal(recoveredFlow.turns[0].response.provider_stop_reason,'stop');assert.match(recoveredFlow.turns[0].response.validation_error,/include_selection must be a boolean/);assert.equal(recoveredFlow.turns[1].request.Messages.find(m=>m.role==='tool').tool_call_id,recoveredFlow.turns[0].response.tool_calls[0].id);assert.equal(recoveredFlow.turns[2].response.stop_reason,'stop');assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
     // Quoted false must stay false, never become a request for selected text.
-    scripted=[{action:'editor',selection:'false'},{action:'finish',text:'Quoted editor flag accepted in Ask.'}];await frame.locator('#prompt').fill('Identify the open workspace files');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Quoted editor flag accepted in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
-    const quotedFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(quotedFlow.turns.length,2);assert.equal(quotedFlow.turns[0].response.validation_error,undefined);assert.equal(JSON.parse(quotedFlow.turns[0].response.tool_calls[0].input).selection,'false');const quotedResult=quotedFlow.turns[1].request.Messages.find(m=>m.role==='tool'&&m.tool_call_id===quotedFlow.turns[0].response.tool_calls[0].id);assert.ok(quotedResult);assert.equal(JSON.parse(quotedResult.content).selection,undefined);assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
+    scripted=[{action:'get_editor_context',include_selection:'false'},{action:'finish',text:'Quoted editor flag accepted in Ask.'}];await frame.locator('#prompt').fill('Identify the open workspace files');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Quoted editor flag accepted in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    const quotedFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(quotedFlow.turns.length,2);assert.equal(quotedFlow.turns[0].response.validation_error,undefined);assert.equal(JSON.parse(quotedFlow.turns[0].response.tool_calls[0].input).include_selection,'false');const quotedResult=quotedFlow.turns[1].request.Messages.find(m=>m.role==='tool'&&m.tool_call_id===quotedFlow.turns[0].response.tool_calls[0].id);assert.ok(quotedResult);assert.equal(JSON.parse(quotedResult.content).selection,undefined);assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
     // Exercise the actual approval dialog and WorkspaceEdit with a disposable file.
     const approvalFile=path.join(temp,'workspace','approval.txt');await fs.writeFile(approvalFile,'original');
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Explore and implement'}).click();
     await frame.locator('#prompt').fill('Change approval.txt to updated');
-    scripted=[{action:'read',path:'approval.txt'},
-      {action:'edit',path:'approval.txt',oldText:'original',newText:'updated'}];
+    scripted=[{action:'read_file',path:'approval.txt'},
+      {action:'edit_file',path:'approval.txt',old_text:'original',new_text:'updated'}];
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     const dialog=window.locator('.monaco-dialog-box');await dialog.waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     await dialog.getByRole('button',{name:/Cancel/}).click();
     await frame.locator('.message-body').filter({hasText:'Approval denied'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
-    scripted=[{action:'read',path:'approval.txt'},
-      {action:'edit',path:'approval.txt',oldText:'original',newText:'updated'},{action:'finish',text:'Approved edit completed.'}];
+    scripted=[{action:'read_file',path:'approval.txt'},
+      {action:'edit_file',path:'approval.txt',old_text:'original',new_text:'updated'},{action:'finish',text:'Approved edit completed.'}];
     await frame.locator('#prompt').fill('Apply the change to approval.txt');
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     await dialog.waitFor();assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     await dialog.getByRole('button',{name:/Permitir/}).click();
     await frame.locator('.message-body').filter({hasText:'Approved edit completed.'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');
-    scripted=[{action:'read',path:'approval.txt'},
-      {action:'edit',path:'approval.txt',oldText:'updated',newText:'bad stale edit'},{action:'finish',text:'Concurrent edit preserved.'}];
+    scripted=[{action:'read_file',path:'approval.txt'},
+      {action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'bad stale edit'},{action:'finish',text:'Concurrent edit preserved.'}];
     await frame.locator('#prompt').fill('Update approval.txt once more');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     await dialog.waitFor();await fs.writeFile(approvalFile,'external edit');
     await dialog.getByRole('button',{name:/Permitir/}).click();
@@ -85,6 +85,16 @@ const root=path.resolve(__dirname,'..');
     // All mode/permission pairs pass through the real webview and controller.
     async function choose(kind,value){await frame.locator('#'+kind+'-trigger').click();await frame.locator('.choice-option').filter({hasText:value}).click();}
     async function send(prompt,replies,expected){scripted=replies;await frame.locator('#prompt').fill(prompt);await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:expected}).waitFor();}
+    await fs.writeFile(path.join(temp,'workspace','README.md'),'Workspace fixture');
+    await fs.writeFile(path.join(temp,'workspace','filter-fixture.txt'),'needle fixture');
+    await send('List matching project files',[
+      {action:'list_files',patterns:['*.txt','README.md','*.txt'],exclude_patterns:['approval.txt']},
+      {action:'finish',text:'Multiple filters verified.'}],'Multiple filters verified.');
+    await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    const filterFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));
+    const filterResult=JSON.parse(filterFlow.turns[1].request.Messages.filter(m=>m.role==='tool').at(-1).content);
+    assert.deepEqual(filterResult.files,['README.md','filter-fixture.txt']);
+    await fs.unlink(path.join(temp,'workspace','README.md'));await fs.unlink(path.join(temp,'workspace','filter-fixture.txt'));
     for(const permission of ['supervised','autonomous']){
       await choose('mode','Explore and implement');await choose('permission',permission==='supervised'?'Ask before editing':'Edit automatically');
       for(const [mode,label]of [['ask','Answer questions'],['plan','Analyze and create']]){
@@ -92,9 +102,9 @@ const root=path.resolve(__dirname,'..');
         assert.equal(await frame.locator('#permission-trigger').isVisible(),true);
         const expected=mode+' '+permission+' stayed read-only';
         await send('Review approval.txt without changing it',[
-          {action:'write',path:'approval.txt',content:'unauthorized'},
-          {action:'command',command:'exit 1'},
-          {action:'read',path:'approval.txt'},
+          {action:'write_file',path:'approval.txt',content:'unauthorized'},
+          {action:'run_command',command:'exit 1'},
+          {action:'read_file',path:'approval.txt'},
           {action:'finish',text:expected}],expected);
         assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');
         assert.equal(await dialog.isVisible(),false);
@@ -103,41 +113,41 @@ const root=path.resolve(__dirname,'..');
     await choose('mode','Analyze and create');
     await send('O que pode me dizer sobre o projeto atual?',[
       {action:'finish',text:'Vou explorar os arquivos do workspace para entender o projeto.'},
-      {action:'list',pattern:'**/*'},
+      {action:'list_files',patterns:['**/*']},
       {action:'finish',text:'Workspace inspection completed after announcement recovery.'}
     ],'Workspace inspection completed after announcement recovery.');
     await send('Plan an update to approval.txt',[
-      {action:'plan',items:[{id:'implement',text:'Update approval.txt',status:'pending'}]},
+      {action:'update_plan',items:[{id:'implement',text:'Update approval.txt',status:'pending'}]},
       {action:'finish',text:'Plan ready for implementation.'}],'Plan ready for implementation.');
     assert.equal(await frame.locator('#checklist-items li').count(),1);
     await choose('mode','Explore and implement');
     assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
     await send('Implement the plan for approval.txt',[
-      {action:'read',path:'approval.txt'},
-      {action:'edit',path:'approval.txt',oldText:'updated',newText:'autonomous'},
-      {action:'plan',items:[{id:'implement',text:'Update approval.txt',status:'done'}]},
+      {action:'read_file',path:'approval.txt'},
+      {action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'autonomous'},
+      {action:'update_plan',items:[{id:'implement',text:'Update approval.txt',status:'completed'}]},
       {action:'finish',text:'Autonomous implementation verified.'}],'Autonomous implementation verified.');
     assert.equal(await fs.readFile(approvalFile,'utf8'),'autonomous');
     assert.equal(await dialog.isVisible(),false);
     await send('Update approval.txt with two related replacements',[
-      {action:'read',path:'approval.txt'},
-      {action:'multiEdit',path:'approval.txt',edits:[{oldText:'autonomous',newText:'verified'},{oldText:'verified',newText:'atomic'}]},
+      {action:'read_file',path:'approval.txt'},
+      {action:'edit_file_batch',path:'approval.txt',edits:[{old_text:'autonomous',new_text:'verified'},{old_text:'verified',new_text:'atomic'}]},
       {action:'finish',text:'Atomic update completed.'}],'Atomic update completed.');
     assert.equal(await fs.readFile(approvalFile,'utf8'),'atomic');
-    scripted=[{action:'question',text:'Which test behavior do you prefer?',options:['Fast','Full']},{action:'finish',text:'Decision received.'}];
+    scripted=[{action:'ask_user',question:'Which test behavior do you prefer?',options:['Fast','Full']},{action:'finish',text:'Decision received.'}];
     await frame.locator('#prompt').fill('Ask me which test behavior to use');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
     const answer=window.locator('.quick-input-widget input[type="text"]');await answer.waitFor();await answer.fill('Full');await window.keyboard.press('Enter');await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
     await send('Create nested/new-file.txt with hello',[
-      {action:'write',path:'nested/new-file.txt',content:'hello'},
+      {action:'write_file',path:'nested/new-file.txt',content:'hello'},
       {action:'finish',text:'Nested file created.'}],'Nested file created.');
     assert.equal(await fs.readFile(path.join(temp,'workspace','nested','new-file.txt'),'utf8'),'hello');
     for(const permission of ['supervised','autonomous']){
       await choose('permission',permission==='supervised'?'Ask before editing':'Edit automatically');
-      scripted=[{action:'command',command:'echo vortex-command-'+permission},{action:'finish',text:'Command approved '+permission}];
+      scripted=[{action:'run_command',command:'echo vortex-command-'+permission},{action:'finish',text:'Command approved '+permission}];
       await frame.locator('#prompt').fill('Run the requested verification command');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
       await dialog.waitFor();await dialog.getByRole('button',{name:/Executar/}).click();
       await frame.locator('.message-body').filter({hasText:'Command approved '+permission}).waitFor();
-      scripted=[{action:'command',command:'echo refused-command-'+permission}];
+      scripted=[{action:'run_command',command:'echo refused-command-'+permission}];
       await frame.locator('#prompt').fill('Run another verification command');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
       await dialog.waitFor();await dialog.getByRole('button',{name:/Cancel/}).click();
       await frame.waitForFunction(()=>document.getElementById('run-status').textContent==='Stopped');

@@ -20,14 +20,14 @@ test('one loaded document is explicitly distinguished from the complete workspac
   const snapshot=await editor.snapshot(root);
   assert.deepEqual(snapshot.files.map(f=>f.path),['package.json']);
   assert.equal(snapshot.scope,'open_editor_documents');
-  assert.equal(snapshot.fileContentsIncluded,false);
+  assert.equal(snapshot.file_contents_included,false);
   assert.match(snapshot.coverage,/not a directory listing/);
-  assert.match(snapshot.nextStep,/use list.*then read/);
-  const listing=JSON.parse(await executeReadTool({action:'list'},root,new AbortController().signal));
+  assert.match(snapshot.next_step,/use list_files.*then read_file/);
+  const listing=JSON.parse(await executeReadTool({action:'list_files'},root,new AbortController().signal));
   assert.equal(listing.scope,'workspace_files');
   assert.equal(listing.files.length,3);
-  assert.equal(listing.pattern,'**/*');
-  assert.equal(listing.nextOffset,null);
+  assert.deepEqual(listing.patterns,['**/*']);
+  assert.equal(listing.next_offset,null);
   mock.workspace.textDocuments=[];
   const empty=await editor.snapshot(root);
   assert.equal(empty.files.length,0);
@@ -40,7 +40,7 @@ test('every mode and protocol distinguishes editor metadata from project evidenc
  for(const mode of ['ask','plan','agent'])for(const protocol of ['native','compatibility']){
   const prompt=systemPrompt(mode,'auto',[],false,'supervised',protocol);
   assert.match(prompt,/one open file does not mean the project has one file/);
-  assert.match(prompt,/list workspace files and read relevant manifests/);
+  assert.match(prompt,/list_files to discover workspace files and read relevant manifests/);
  }
- assert.match(registry.editor.description,/Not a directory listing/);
+ assert.match(registry.get_editor_context.description,/Not a directory listing/);
 });

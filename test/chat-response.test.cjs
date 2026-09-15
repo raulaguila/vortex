@@ -3,7 +3,7 @@ const {Client}=require('../dist/providers');const {decodeNative}=require('../dis
 const {compatibilityAnswer,responseMetadata}=require('../dist/chatResponse');
 test('greeting succeeds then a tool-only response identifies protocol mismatch after an actual request',async()=>{
  let requests=0;const logs=[];const key='private-key';
- const client=new Client({id:'p',kind:'compatible',name:'Gateway',baseUrl:'http://example.test/company'},key,async(_url,options)=>{requests++;const body=JSON.parse(options.body);assert.equal(body.stream,false);return new Response(JSON.stringify(requests===1?{choices:[{message:{content:'Olá!'}}]}:{choices:[{finish_reason:'tool_calls',message:{content:null,tool_calls:[{id:'c',function:{name:'list',arguments:'{}'}}]}}]}));},record=>logs.push(record));
+ const client=new Client({id:'p',kind:'compatible',name:'Gateway',baseUrl:'http://example.test/company'},key,async(_url,options)=>{requests++;const body=JSON.parse(options.body);assert.equal(body.stream,false);return new Response(JSON.stringify(requests===1?{choices:[{message:{content:'Olá!'}}]}:{choices:[{finish_reason:'tool_calls',message:{content:null,tool_calls:[{id:'c',function:{name:'list_files',arguments:'{}'}}]}}]}));},record=>logs.push(record));
  const signal=new AbortController().signal;assert.equal(await client.chat('model','system',[{role:'user',content:'oi'}],signal),'Olá!');
  await assert.rejects(client.chat('model','system',[{role:'user',content:'oi'},{role:'assistant',content:'Olá!'},{role:'user',content:'o que pode me dizer sobre o projeto atual?'}],signal),/tool_protocol_mismatch/);
  assert.equal(requests,2);assert.equal(logs.filter(l=>l.event==='providerResponse'&&l.httpStatus===200).length,2);assert.equal(logs.at(-1).hasTools,true);
@@ -19,6 +19,6 @@ test('empty, refused, incomplete, malformed and unexpected tool responses are di
  assert.throws(()=>compatibilityAnswer('compatible',null),/empty_response/);
  assert.throws(()=>compatibilityAnswer('compatible',{choices:[{finish_reason:'length',message:{content:''}}]}),/output_limit/);
  assert.throws(()=>compatibilityAnswer('compatible',{choices:[{message:{refusal:'do not log this',content:null}}]}),/response_refused/);
- assert.throws(()=>compatibilityAnswer('anthropic',{content:[{type:'tool_use',id:'c',name:'read',input:{path:'a'}}]}),/tool_protocol_mismatch/);
- assert.throws(()=>compatibilityAnswer('gemini',{candidates:[{content:{parts:[{functionCall:{name:'read',args:{path:'a'}}}]}}]}),/tool_protocol_mismatch/);
+ assert.throws(()=>compatibilityAnswer('anthropic',{content:[{type:'tool_use',id:'c',name:'read_file',input:{path:'a'}}]}),/tool_protocol_mismatch/);
+ assert.throws(()=>compatibilityAnswer('gemini',{candidates:[{content:{parts:[{functionCall:{name:'read_file',args:{path:'a'}}}]}}]}),/tool_protocol_mismatch/);
 });

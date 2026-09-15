@@ -26,11 +26,11 @@ export class ToolOutputs {
   const bytes=Buffer.byteLength(value);
   while(this.size+bytes>maximum&&this.values.size){const id=this.values.keys().next().value!;this.size-=Buffer.byteLength(this.values.get(id)!);this.values.delete(id);}
   const id=randomUUID();this.values.set(id,value);this.size+=bytes;this.dirty=true;
-  return JSON.stringify({preview:value.slice(0,limit),truncated:true,outputId:id,nextOffset:limit,totalCharacters:value.length,instruction:'Use readOutput with outputId as id and nextOffset as offset. Retained pages are available across session restarts; older pages may expire when storage reaches its limit.'});
+  return JSON.stringify({preview:value.slice(0,limit),truncated:true,output_id:id,next_offset:limit,total_characters:value.length,instruction:'Use read_tool_output with output_id and next_offset as offset. Retained pages are available across session restarts; older pages may expire when storage reaches its limit.'});
  }
  read(id:string,offset=0,limit=2000){
   const value=this.values.get(id);if(value===undefined)throw new Error('Output expired or unavailable. The preview was partial. Run a narrower original query.');
   const end=Math.min(value.length,offset+limit);
-  return JSON.stringify({text:value.slice(offset,end),nextOffset:end<value.length?end:null,totalCharacters:value.length});
+  return JSON.stringify({text:value.slice(offset,end),next_offset:end<value.length?end:null,total_characters:value.length});
  }
 }

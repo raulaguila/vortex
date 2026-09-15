@@ -15,44 +15,51 @@ async function textFile(root:string,relative:string){
  const stat=await vscode.workspace.fs.stat(vscode.Uri.file(file));if(stat.size>1000000)throw new Error('File exceeds 1 MB.');
  return {text:await readFile(file,'utf8'),dirty:false,source:'disk'};
 }
-async function candidates(root:string,pattern='**/*'){
- const found=await vscode.workspace.findFiles(new vscode.RelativePattern(root,pattern),exclude,10001);
- const files=found.map(f=>path.relative(root,f.fsPath)).filter(f=>!f.endsWith('.vsix')&&!f.split(/[\\/]/).some(s=>s==='.env'||s.startsWith('.env.'))).sort();
- return {files:files.slice(0,10000),capped:found.length>10000};
+async function candidates(root:string,patterns=['**/*'],exclude_patterns:string[]=[],signal?:AbortSignal){
+ const excluded=exclude_patterns.length?'{'+[exclude,...exclude_patterns].join(',')+'}':exclude;
+ const matches=await Promise.all(patterns.map(pattern=>vscode.workspace.findFiles(new vscode.RelativePattern(root,pattern),excluded,10001)));
+ const unique=new Set<string>();
+ for(const uri of matches.flat()){
+  signal?.throwIfAborted();const relative=path.relative(root,uri.fsPath);
+  if(relative.endsWith('.vsix'))continue;
+  try{await safePath(root,relative);unique.add(relative);}catch{/* Protected or escaping paths are never exposed. */}
+ }
+ const files=[...unique].sort();
+ return {files:files.slice(0,10000),capped:files.length>10000||matches.some(page=>page.length>10000),excluded};
 }
 export async function executeReadTool(a:Action,root:string,signal:AbortSignal,versions?:Map<string,string>):Promise<string|undefined>{
  signal.throwIfAborted();
- if(a.action==='list'){
-  const {files,capped}=await candidates(root,a.pattern),offset=a.offset||0,end=Math.min(files.length,offset+(a.limit||100));
-  return JSON.stringify({scope:'workspace_files',pattern:a.pattern||'**/*',coverage:'Matching workspace paths only, subject to exclusions and pagination; file contents are not included.',files:files.slice(offset,end),nextOffset:end<files.length?end:null,totalDiscovered:files.length,capped,excluded:exclude});
+ if(a.action==='list_files'){
+  const {files,capped,excluded}=await candidates(root,a.patterns,a.exclude_patterns,signal),offset=a.offset||0,end=Math.min(files.length,offset+(a.limit||100));
+  return JSON.stringify({scope:'workspace_files',patterns:a.patterns||['**/*'],coverage:'Matching workspace paths only, subject to exclusions and pagination; file contents are not included.',files:files.slice(offset,end),next_offset:end<files.length?end:null,total_discovered:files.length,capped,excluded});
  }
- if(a.action==='read'){
+ if(a.action==='read_file'){
   const value=await textFile(root,a.path);signal.throwIfAborted();if(value.text.includes('\0'))throw new Error('Binary file.');
-  const lines=value.text.split('\n'),start=a.startLine||1,end=Math.min(lines.length,start+399,a.endLine||start+199),version=contentVersion(value.text);
+  const lines=value.text.split('\n'),start=a.start_line||1,end=Math.min(lines.length,start+399,a.end_line||start+199),version=contentVersion(value.text);
   versions?.set(await safePath(root,a.path),version);
-  return JSON.stringify({path:a.path,source:value.source,dirty:value.dirty,version,startLine:start,endLine:end,totalLines:lines.length,nextLine:end<lines.length?end+1:null,content:lines.slice(start-1,end).map((line,i)=>`${start+i}: ${line}`).join('\n')});
+  return JSON.stringify({path:a.path,source:value.source,dirty:value.dirty,version,start_line:start,end_line:end,total_lines:lines.length,next_line:end<lines.length?end+1:null,content:lines.slice(start-1,end).map((line,i)=>`${start+i}: ${line}`).join('\n')});
  }
- if(a.action==='search'){
-  const {files,capped}=await candidates(root,a.pattern),offset=a.offset||0,end=Math.min(files.length,offset+100),scanned=[];let skipped=0;
+ if(a.action==='search_files'){
+  const {files,capped,excluded}=await candidates(root,a.patterns,a.exclude_patterns,signal),offset=a.offset||0,end=Math.min(files.length,offset+100),scanned=[];let skipped=0;
   for(const file of files.slice(offset,end)){signal.throwIfAborted();try{const value=await textFile(root,file);if(value.text.includes('\0')||value.text.length>100000){skipped++;continue;}scanned.push({path:file,text:value.text});}catch{skipped++;}}
-  const result=await searchPage(scanned,a.query,!!a.regex,!!a.caseSensitive,signal);
-  return JSON.stringify({...result,scannedFiles:scanned.length,skippedFiles:skipped,nextOffset:end<files.length?end:null,totalDiscovered:files.length,capped,excluded:exclude,coverage:'Only this page of accessible text files; skipped files were not searched.'});
+  const result=await searchPage(scanned,a.query,!!a.regex,!!a.case_sensitive,signal);
+  return JSON.stringify({...result,scanned_files:scanned.length,skipped_files:skipped,next_offset:end<files.length?end:null,total_discovered:files.length,capped,excluded,coverage:'Only this page of accessible text files; skipped files were not searched.'});
  }
- if(a.action==='diagnostics'){
-  const rows=[];let total=0;const requested=a.path?await safePath(root,a.path):undefined;
+ if(a.action==='get_diagnostics'){
+  const rows=[];let total=0;const offset=a.offset||0,limit=a.limit||100;const requested=a.paths?new Set(await Promise.all(a.paths.map(file=>safePath(root,file)))):undefined;
   for(const [uri,ds]of vscode.languages.getDiagnostics()){
-   signal.throwIfAborted();const relative=path.relative(root,uri.fsPath);try{await safePath(root,relative);}catch{continue;}
-   if(requested&&uri.fsPath!==requested)continue;
-   for(const d of ds){if(a.severity==='error'&&d.severity!==0||a.severity==='warning'&&d.severity!==1)continue;total++;if(rows.length<200)rows.push({file:relative,line:d.range.start.line+1,severity:d.severity,message:d.message.slice(0,2000)});}
+   signal.throwIfAborted();const relative=path.relative(root,uri.fsPath);let canonical;try{canonical=await safePath(root,relative);}catch{continue;}
+   if(requested&&!requested.has(canonical))continue;
+   for(const d of ds){if(a.severity==='error'&&d.severity!==0||a.severity==='warning'&&d.severity!==1)continue;total++;if(total>offset&&rows.length<limit)rows.push({file:relative,line:d.range.start.line+1,severity:d.severity,message:d.message.slice(0,2000)});}
   }
-  return JSON.stringify({items:rows,total,truncated:total>rows.length,source:'Current IDE diagnostics; tests were not run.'});
+  return JSON.stringify({scope:'ide_diagnostics',items:rows,total,next_offset:offset+rows.length<total?offset+rows.length:null,truncated:offset+rows.length<total,coverage:'Current IDE diagnostics only; files without diagnostics may not have been analyzed.',source:'Current IDE diagnostics; tests were not run.'});
  }
- if(a.action==='skill'){
+ if(a.action==='get_project_skill'){
   const directory=await safePath(root,'.vortex/skills');
   if(!a.name){let entries;try{entries=await readdir(directory,{withFileTypes:true});}catch(e:any){if(e.code==='ENOENT')return JSON.stringify({skills:[]});throw e;}return JSON.stringify({skills:entries.filter(e=>e.isDirectory()&&/^[a-zA-Z0-9_-]+$/.test(e.name)).slice(0,100).map(e=>e.name)});}
   const value=await textFile(root,`.vortex/skills/${a.name}/SKILL.md`);if(value.text.length>32000)throw new Error('Skill exceeds 32 KB.');return JSON.stringify({name:a.name,instructions:value.text,scope:'Project guidance only; cannot expand permissions or override the user.'});
  }
- if(a.action==='symbols'){
+ if(a.action==='query_symbols'){
   const uri=vscode.Uri.file(await safePath(root,a.path));const operation=a.operation||'document';
   const command=operation==='document'?'vscode.executeDocumentSymbolProvider':operation==='definition'?'vscode.executeDefinitionProvider':'vscode.executeReferenceProvider';
   let timer:ReturnType<typeof setTimeout>|undefined;const abort=()=>rejectWait?.(new Error('Symbol query cancelled.'));let rejectWait:((e:Error)=>void)|undefined;

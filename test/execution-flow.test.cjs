@@ -15,7 +15,7 @@ test('late approval cannot authorize a cancelled run',async()=>{
 });
 test('tool-only stream progress counts, heartbeat does not',async()=>{
  const p={id:'p',kind:'compatible',name:'T',baseUrl:'http://localhost'};
- const transport=async()=>new Response(new ReadableStream({start(s){s.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'a',function:{name:'read',arguments:'{"path":"x"}'}}]}}]})+'\n\n'));s.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{delta:{},finish_reason:'tool_calls'}]})+'\n\n'));s.close();}}),{headers:{'content-type':'text/event-stream'}});
+ const transport=async()=>new Response(new ReadableStream({start(s){s.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'a',function:{name:'read_file',arguments:'{"path":"x"}'}}]}}]})+'\n\n'));s.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{delta:{},finish_reason:'tool_calls'}]})+'\n\n'));s.close();}}),{headers:{'content-type':'text/event-stream'}});
  const client=new Client(p,'',transport);let progress=0;client.onProgress=()=>progress++;const turn=await client.turn('m','s',[],new AbortController().signal,{tokens:1000,output:100},[],()=>{});assert.equal(turn.calls[0].id,'a');assert.equal(progress,1);
 });
 test('context calibration is scoped to model and uses five samples',()=>{

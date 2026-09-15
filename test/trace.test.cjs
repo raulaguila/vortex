@@ -18,26 +18,26 @@ test('last flow uses reference envelope, records rounds and redacts credential',
 test('trace preserves tool IDs, result sources and failed requests',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
  const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});
- const i=await trace.request('/chat/completions',{model:'m',messages:[{role:'assistant',content:'',tool_calls:[{id:'a',function:{name:'read',arguments:'{"path":"x"}'}}]},{role:'tool',tool_call_id:'a',content:'result'}],tools:[{type:'function',function:{name:'read',description:'Read',parameters:{type:'object'}}}]});
- await trace.response(i,undefined,'timeout');await trace.finish('error',[{role:'assistant',content:'',toolCalls:[{id:'a',name:'read',arguments:{path:'x'}}]},{role:'user',content:'result',toolResult:{id:'a',name:'read',status:'success',output:'result'}}]);
- const j=JSON.parse(await fs.readFile(trace.path,'utf8'));assert.equal(j.turns[0].request.Messages[1].tool_call_id,'a');assert.equal(j.turns[0].response.error,'timeout');assert.deepEqual(j.sources,[{tool:'read',input:'{"path":"x"}',result:'result'}]);assert.equal(j.final_answer,'');
+ const i=await trace.request('/chat/completions',{model:'m',messages:[{role:'assistant',content:'',tool_calls:[{id:'a',function:{name:'read_file',arguments:'{"path":"x"}'}}]},{role:'tool',tool_call_id:'a',content:'result'}],tools:[{type:'function',function:{name:'read_file',description:'Read',parameters:{type:'object'}}}]});
+ await trace.response(i,undefined,'timeout');await trace.finish('error',[{role:'assistant',content:'',toolCalls:[{id:'a',name:'read_file',arguments:{path:'x'}}]},{role:'user',content:'result',toolResult:{id:'a',name:'read_file',status:'success',output:'result'}}]);
+ const j=JSON.parse(await fs.readFile(trace.path,'utf8'));assert.equal(j.turns[0].request.Messages[1].tool_call_id,'a');assert.equal(j.turns[0].response.error,'timeout');assert.deepEqual(j.sources,[{tool:'read_file',input:'{"path":"x"}',result:'result'}]);assert.equal(j.final_answer,'');
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 
 test('compatibility trace records interpreted tool use and keeps provider stop and content',async()=>{
  const {compatibilityTurn}=require('../dist/turnProtocol');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
-  const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});let count=0;const raw='{"action":"editor","selection":false}';
+  const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});let count=0;const raw='{"action":"get_editor_context","include_selection":false}';
   const client=new Client({id:'p',name:'P',kind:'compatible',baseUrl:'http://local'},'',async()=>new Response(JSON.stringify({choices:[{message:{content:++count===1?raw:'Project summary.'},finish_reason:'stop'}]})));client.attachTrace(trace);
   const history=[{role:'user',content:'Describe the open project.'}],signal=new AbortController().signal;const first=compatibilityTurn(await client.chat('m','system',history,signal),'ask');await trace.interpreted(first);
-  history.push({role:'assistant',content:first.text,toolCalls:first.calls},{role:'user',content:'Open files',toolResult:{id:first.calls[0].id,name:'editor',status:'success',output:'Open files'}});
+  history.push({role:'assistant',content:first.text,toolCalls:first.calls},{role:'user',content:'Open files',toolResult:{id:first.calls[0].id,name:'get_editor_context',status:'success',output:'Open files'}});
   const answer=await client.chat('m','system',history,signal);history.push({role:'assistant',content:answer});await trace.finish('complete',history);const j=JSON.parse(await fs.readFile(trace.path,'utf8'));
   assert.equal(j.turns[0].response.stop_reason,'tool_use');assert.equal(j.turns[0].response.provider_stop_reason,'stop');assert.equal(j.turns[0].response.provider_content,raw);assert.equal(j.turns[0].response.tool_calls[0].id,first.calls[0].id);assert.equal(j.turns[1].request.Messages.find(m=>m.role==='tool').tool_call_id,first.calls[0].id);assert.equal(j.turns[1].response.stop_reason,'stop');
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('trace distinguishes rejected native calls from provider completion state',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
-  const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});const turn={kind:'tool_use',stopReason:'stop',text:'',calls:[{id:'a',name:'editor',arguments:{invalid:true}}]};
-  const i=await trace.request('/chat/completions',{messages:[],model:'m'});await trace.response(i,{choices:[{message:{content:'',tool_calls:[{id:'a',function:{name:'editor',arguments:'{"invalid":true}'}}]},finish_reason:'stop'}]},undefined,'compatible');await trace.interpreted(turn,'Invalid editor arguments: unknown field.');await trace.finish('error',[]);
+  const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});const turn={kind:'tool_use',stopReason:'stop',text:'',calls:[{id:'a',name:'get_editor_context',arguments:{invalid:true}}]};
+  const i=await trace.request('/chat/completions',{messages:[],model:'m'});await trace.response(i,{choices:[{message:{content:'',tool_calls:[{id:'a',function:{name:'get_editor_context',arguments:'{"invalid":true}'}}]},finish_reason:'stop'}]},undefined,'compatible');await trace.interpreted(turn,'Invalid editor arguments: unknown field.');await trace.finish('error',[]);
   const j=JSON.parse(await fs.readFile(trace.path,'utf8'));assert.equal(j.turns[0].response.stop_reason,'tool_use');assert.equal(j.turns[0].response.provider_stop_reason,'stop');assert.match(j.turns[0].response.validation_error,/Invalid editor arguments/);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });

@@ -160,8 +160,8 @@ footer { padding-inline: 4px; }
 #checklist-progress { color:var(--muted); }
 #checklist-items { list-style:none;padding:0;margin:6px 0 0;font-size:11px; }
 #checklist-items li { display:flex;gap:7px;padding:4px 0;line-height:1.5; }
-#checklist-items .done { color:var(--muted); }
-#checklist-items .done span:last-child { text-decoration:line-through; }
+#checklist-items .completed { color:var(--muted); }
+#checklist-items .completed span:last-child { text-decoration:line-through; }
 .message-body pre { background:var(--vscode-textCodeBlock-background,var(--input));padding:10px;border-radius:6px;overflow:auto;white-space:pre;font-family:var(--vscode-editor-font-family,monospace); }
 .message-body code { font-family:var(--vscode-editor-font-family,monospace);font-size:.92em; }
 .message-body p { font-size:inherit;color:inherit; }

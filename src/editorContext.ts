@@ -5,8 +5,8 @@ import {safePath} from './policy';
 export const editorContextCoverage = {
   scope:'open_editor_documents',
   coverage:'Only documents currently loaded in the editor; not a directory listing. Other workspace files may exist.',
-  fileContentsIncluded:false,
-  nextStep:'For a project overview, use list with pattern **/*, then read README.md, package.json or other relevant files. File names and language metadata do not establish project behavior.'
+  file_contents_included:false,
+  next_step:'For a project overview, use list_files with pattern **/*, then read_file README.md, package.json or other relevant files. File names and language metadata do not establish project behavior.'
 } as const;
 
 export class EditorContext implements vscode.Disposable {
@@ -26,6 +26,6 @@ export class EditorContext implements vscode.Disposable {
       files.push({path:relative,language:doc.languageId,dirty:doc.isDirty,version:doc.version,active:doc===this.last?.document});
     }
     const active=files.find(f=>f.active);const editor=this.last;
-    return {...editorContextCoverage,files,active:active?.path||null,...(selection&&active&&editor?{selection:{startLine:editor.selection.start.line+1,endLine:editor.selection.end.line+1,character:editor.selection.active.character+1,text:editor.document.getText(editor.selection).slice(0,32000),truncated:editor.document.getText(editor.selection).length>32000}}:{})};
+    return {...editorContextCoverage,files,active:active?.path||null,...(selection&&active&&editor?{selection:{start_line:editor.selection.start.line+1,end_line:editor.selection.end.line+1,character:editor.selection.active.character+1,text:editor.document.getText(editor.selection).slice(0,32000),truncated:editor.document.getText(editor.selection).length>32000}}:{})};
   }
 }

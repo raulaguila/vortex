@@ -17,11 +17,11 @@ test('symlink aliases cannot bypass protected files or change a pending edit tar
 test('plain Markdown is a final answer; only validated complete JSON executes tools',()=>{
  assert.equal(decodeReply('## Hello\nA useful answer.','ask').action,'finish');
  assert.equal(decodeReply('```js\nconsole.log(1)\n```','agent').action,'finish');
- assert.equal(decodeReply('```json\n{"action":"read","path":"README.md"}\n```','ask').action,'read');
+ assert.equal(decodeReply('```json\n{"action":"read_file","path":"README.md"}\n```','ask').action,'read_file');
  assert.equal(decodeReply('<think>private</think>{"action":"finish","text":"hello"}','ask').text,'hello');
- for(const value of ['null','{"action":"write"','[{"action":"read"}]','<think>unfinished'])assert.throws(()=>decodeReply(value,'agent'));
- assert.throws(()=>decodeReply('{"action":"write","path":"a","content":"bad"}','ask'));
- assert.throws(()=>decodeReply('{"action":"read","path":"a"}','agent',true));
+ for(const value of ['null','{"action":"write_file"','[{"action":"read_file"}]','<think>unfinished'])assert.throws(()=>decodeReply(value,'agent'));
+ assert.throws(()=>decodeReply('{"action":"write_file","path":"a","content":"bad"}','ask'));
+ assert.throws(()=>decodeReply('{"action":"read_file","path":"a"}','agent',true));
 });
 test('context eviction preserves the latest user request rather than the first task',()=>{
  const old=[{role:'user',content:'old task '+ 'x'.repeat(1000)},{role:'assistant',content:'old answer '+ 'x'.repeat(1000)}];

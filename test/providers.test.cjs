@@ -44,7 +44,7 @@ test('model identities and preferences remain separate for two connections with 
   const restored=new ProviderManager(storage,secrets);assert.deepEqual(restored.preferences().selected,ma);assert.equal(restored.preferences().favorites.length,2);assert.equal(restored.preferences().manualModels.length,2);
   await restored.remove(a);assert.equal(restored.preferences().selected,null);assert.deepEqual(restored.preferences().favorites,[mb]);assert.deepEqual(restored.preferences().manualModels,[mb]);assert.equal(await secrets.get('key:'+a),undefined);
 });
-test('catalog errors and empty catalogs do not affect other connections; manual selection works after failure',async()=>{
+test('catalog errors and empty catalogs do not affect other connections; manual include_selection works after failure',async()=>{
   const {manager}=setup(async url=>url.includes('bad')?new Response('secret',{status:401}):response([]));
   const bad=await manager.save(input({baseUrl:'https://bad.example'})),good=await manager.save(input());
   await Promise.all([manager.refresh(bad,'bad-1',async()=>{}),manager.refresh(good,'good-1',async()=>{})]);
@@ -63,11 +63,11 @@ test('editing a connection invalidates its in-flight catalog',async()=>{
   const pending=manager.refresh(id,'before-edit',async()=>{});await tick();await manager.save(input({id,name:'Updated',key:''}));finish(response(['old']));await pending;
   assert.equal((await manager.snapshot()).providers[0].catalog.status,'idle');
 });
-test('manual removal clears unavailable selection and favorite without selecting another model',async()=>{
+test('manual removal clears unavailable include_selection and favorite without selecting another model',async()=>{
   const {manager}=setup();const id=await manager.save(input());const model={providerId:id,modelId:'manual'};await manager.manual(model,false);await manager.favorite(model,true);await manager.setSelection(model);await manager.manual(model,true);
   assert.equal(manager.preferences().selected,null);assert.deepEqual(manager.preferences().favorites,[]);assert.deepEqual(manager.preferences().manualModels,[]);
 });
-test('legacy selection migrates once and cannot restore a deliberately cleared selection',async()=>{
+test('legacy include_selection migrates once and cannot restore a deliberately cleared include_selection',async()=>{
   const {manager}=setup();const id=await manager.save(input());const legacy={providerId:id,modelId:'legacy-model'};
   await manager.migrateSelection(legacy);assert.deepEqual(manager.preferences().selected,legacy);await manager.setSelection(null);await manager.migrateSelection(legacy);assert.equal(manager.preferences().selected,null);
 });
@@ -87,7 +87,7 @@ test('old preferences gain conversation and context defaults without losing sele
  await storage.update('modelPreferences',{selected:ref,favorites:[ref],manualModels:[]});
  assert.deepEqual(manager.preferences().selected,ref);assert.equal(manager.preferences().conversation.language,'auto');assert.equal(manager.preferences().conversation.uiLanguage,'en');assert.deepEqual(manager.preferences().context,{});
 });
-test('mode defaults only change selection when applied, and deletion clears defaults',async()=>{
+test('mode defaults only change include_selection when applied, and deletion clears defaults',async()=>{
  const {manager}=setup();const id=await manager.save(input());const a={providerId:id,modelId:'a'},b={providerId:id,modelId:'b'};
  await manager.setSelection(a);await manager.setDefault('plan',b);assert.deepEqual(manager.preferences().selected,a);await manager.applyMode('plan');assert.deepEqual(manager.preferences().selected,b);await manager.setSelection(a);await manager.applyMode('ask');assert.deepEqual(manager.preferences().selected,a);await manager.remove(id);assert.equal(manager.preferences().defaults.plan,null);
 });

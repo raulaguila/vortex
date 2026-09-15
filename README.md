@@ -16,6 +16,15 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.9.0
+
+- Ferramentas e parâmetros usam nomes explícitos em `snake_case`, com descrições e validação compartilhadas entre protocolos nativo e compatibilidade. Consulte o [catálogo completo](docs/tool-reference.md).
+- Listagem e busca aceitam múltiplos padrões e exclusões; diagnósticos aceitam múltiplos caminhos e paginação.
+- Contexto do editor distingue documentos abertos de arquivos do workspace. Checklists têm IDs únicos e no máximo uma etapa em andamento.
+- Resultados extensos aceitam tamanho de página configurado pela ferramenta; comandos informam execução no host ou sandbox.
+
+Os nomes anteriores não são aliases. Inicie uma nova conversa após atualizar, pois chamadas antigas e estados antigos de checklist não são convertidos. Conexões e credenciais são preservadas.
+
 ## Versão 0.8.1
 
 O contexto do editor agora informa explicitamente que cobre somente documentos abertos, sem representar o diretório inteiro ou o conteúdo dos arquivos. Os prompts de Ask, Plan e Agent orientam a usar listagem e leitura para descrever um projeto. A listagem informa escopo, padrão, exclusões e paginação.

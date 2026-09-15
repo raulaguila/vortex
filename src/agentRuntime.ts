@@ -266,8 +266,8 @@ export class AgentRuntime {
   protected flushCommandOutput(){clearTimeout(this.commandTimer);this.commandTimer=undefined;if(this.commandChunks){this.post({type:'commandOutput',...this.commandChunks});this.commandChunks=undefined;}}
   protected async execute(input:unknown,mode:Mode,root:string|undefined,signal:AbortSignal,permission:Permission='supervised'):Promise<string>{
     const a=validateAction(input,mode);signal.throwIfAborted();
-    if(a.action==='plan'){if(mode==='plan'&&a.items.some(item=>item.status!=='pending'&&!this.checklist.some(old=>old.id===item.id&&old.text===item.text&&old.status===item.status)))throw new Error('Plan mode cannot mark implementation progress. Keep new steps pending.');this.checklist=a.items;this.post({type:'checklist',items:this.checklist});return 'Checklist updated.';}
-    if(a.action==='readOutput')return this.outputs.read(a.id,a.offset,Math.min(2000,Math.floor((this.outputLimit-200)/6)));
+    if(a.action==='update_plan'){if(mode==='plan'&&a.items.some(item=>item.status!=='pending'&&!this.checklist.some(old=>old.id===item.id&&old.text===item.text&&old.status===item.status)))throw new Error('Plan mode cannot mark implementation progress. Keep new steps pending.');this.checklist=a.items;this.post({type:'checklist',items:this.checklist});return 'Checklist updated.';}
+    if(a.action==='read_tool_output')return this.outputs.read(a.output_id,a.offset,Math.max(1,Math.min(a.limit??2000,Math.floor((this.outputLimit-200)/6))));
     return this.host.execute(a,mode,root,signal,permission);
   }
 }

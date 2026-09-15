@@ -9,7 +9,7 @@ test('native and compatibility prompts preserve identical behavioral sections',(
  for(const mode of ['ask','plan','agent'])for(const permission of ['supervised','autonomous']){
   const compatibility=systemPrompt(mode,'auto',[],false,permission),native=systemPrompt(mode,'auto',[],false,permission,'native');
   assert.equal(nativePrompt(compatibility),native);
-  assert.match(native,/Never claim an edit or test succeeded/);assert.match(native,/edit\/write arguments/);
+  assert.match(native,/Never claim an edit or test succeeded/);assert.match(native,/edit_file\/write_file arguments/);
  }
  for(const mode of ['ask','plan','agent'])for(const tool of toolDefinitions(mode)){
   assert.equal(tool.description,registry[tool.name].description);
@@ -18,15 +18,15 @@ test('native and compatibility prompts preserve identical behavioral sections',(
  }
 });
 test('atomic replacements preserve original and reject the entire invalid sequence',()=>{
- const original='one two';assert.equal(applyEdits(original,[{oldText:'one',newText:'three'},{oldText:'two',newText:'four'}]),'three four');
- assert.throws(()=>applyEdits(original,[{oldText:'one',newText:'three'},{oldText:'missing',newText:'four'}]));assert.equal(original,'one two');
- assert.throws(()=>applyEdits('aa',[{oldText:'a',newText:'b'}]));
- for(const mode of ['ask','plan'])assert.throws(()=>validateAction({action:'multiEdit',path:'a',edits:[{oldText:'a',newText:'b'}]},mode));
+ const original='one two';assert.equal(applyEdits(original,[{old_text:'one',new_text:'three'},{old_text:'two',new_text:'four'}]),'three four');
+ assert.throws(()=>applyEdits(original,[{old_text:'one',new_text:'three'},{old_text:'missing',new_text:'four'}]));assert.equal(original,'one two');
+ assert.throws(()=>applyEdits('aa',[{old_text:'a',new_text:'b'}]));
+ for(const mode of ['ask','plan'])assert.throws(()=>validateAction({action:'edit_file_batch',path:'a',edits:[{old_text:'a',new_text:'b'}]},mode));
 });
 test('tool output pages preserve full text and identify expired IDs',()=>{
  const outputs=new ToolOutputs(),text='a'.repeat(20000),first=JSON.parse(outputs.preserve(text,1000));
- let combined=first.preview,offset=first.nextOffset;while(offset!==null){const page=JSON.parse(outputs.read(first.outputId,offset));combined+=page.text;offset=page.nextOffset;}assert.equal(combined,text);
- assert.throws(()=>outputs.read('made-up'));assert.throws(()=>new ToolOutputs().read(first.outputId));
+ let combined=first.preview,offset=first.next_offset;while(offset!==null){const page=JSON.parse(outputs.read(first.output_id,offset));combined+=page.text;offset=page.next_offset;}assert.equal(combined,text);
+ assert.throws(()=>outputs.read('made-up'));assert.throws(()=>new ToolOutputs().read(first.output_id));
 });
 test('search supports literal, case-sensitive and regex queries with explicit truncation',async()=>{
  const signal=new AbortController().signal,files=[{path:'a',text:'HELLO\nhello\na.b\nacb'}];

@@ -14,7 +14,7 @@ export interface ProviderInput { id?: string; name: string; kind: Kind; baseUrl:
 export interface Catalog { status: 'idle' | 'loading' | 'ready' | 'error'; models: string[]; error?: string; requestId?: string }
 export interface Connection extends Provider { hasKey: boolean; catalog: Catalog }
 export interface ModelLimits { tools?: boolean; input: number | null; output: number | null; status: 'ready' | 'unknown'; error?: string }
-export interface ChecklistItem { id: string; text: string; status: 'pending' | 'running' | 'done' }
+export interface ChecklistItem { id: string; text: string; status: 'pending' | 'in_progress' | 'completed' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
 export interface SettingsState {diagnosticVersions?:Record<string,string>;effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
 export interface ActivityData {runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}

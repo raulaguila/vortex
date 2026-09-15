@@ -24,7 +24,7 @@ export function isHostResponse(v:unknown):v is Response {
  case 'stream':return str(v.id)&&str(v.text)&&bool(v.done);
  case 'usage':return model(v.model)&&num(v.input)&&num(v.output);
  case 'context':return num(v.used)&&num(v.budget)&&num(v.removed)&&str(v.source)&&(v.model===undefined||model(v.model));
- case 'checklist':return array(v.items)&&v.items.every((i:any)=>record(i)&&str(i.id)&&str(i.text)&&['pending','running','done'].includes(i.status));
+ case 'checklist':return array(v.items)&&v.items.every((i:any)=>record(i)&&str(i.id)&&str(i.text)&&['pending','in_progress','completed'].includes(i.status));
  case 'attachments':return array(v.items)&&v.items.every((i:any)=>record(i)&&str(i.id)&&str(i.label));
  case 'sessions':return str(v.requestId)&&array(v.sessions)&&v.sessions.every((i:any)=>record(i)&&str(i.id)&&str(i.title)&&num(i.updatedAt));
  case 'sessionLoaded':return (v.readOnly===undefined||typeof v.readOnly==='boolean')&&model(v.model)&&['ask','plan','agent'].includes(v.mode)&&['supervised','autonomous'].includes(v.permission);
