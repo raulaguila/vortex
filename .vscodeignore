@@ -16,3 +16,6 @@ scripts/**
 
 webview/**
 tsconfig.webview.json
+
+.vscode-test/**
+.github/**

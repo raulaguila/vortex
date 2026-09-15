@@ -15,3 +15,5 @@ media/app.js
 media/settings.js
 media/shared.js
 media/picker.js
+
+.vscode-test/
