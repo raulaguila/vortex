@@ -33,7 +33,7 @@ export const registry:Record<Action['action'],Entry>={
  read:define('Read numbered lines from disk or an open buffer. Use the returned version and do not copy line-number prefixes into edits.',object({path:file,startLine:integer(1,10000000),endLine:integer(1,10000000)},['path']),{path:'src/file.ts',startLine:1,endLine:200},'read',modes,'Reading file'),
  search:define('Search a page of workspace files. Literal by default; regex and caseSensitive optional. Inspect coverage/nextOffset; no matches only describes the scanned page.',object({query:string('Text or regex',300,1),pattern:string('File glob',500,1),offset:integer(0,10000),caseSensitive:{type:'boolean'},regex:{type:'boolean'}},['query']),{query:'function',pattern:'src/**'},'read',modes,'Searching files'),
  diagnostics:define('Read current IDE diagnostics, optionally by file and severity. Does not run tests.',object({path:file,severity:{type:'string',enum:['error','warning','all']}},[]),{},'read',modes,'Checking diagnostics'),
- editor:define('Identify the last active code editor and open files. selection:true reads selected text. Use when the user refers to this file or their selection.',object({selection:{type:'boolean'}},[]),{selection:true},'read',modes,'Reading editor context'),
+ editor:define('Read-only: identify the last active code editor and open files. selection:true reads selected text. Never edits files or editor state. Use when the user refers to this file or their selection.',object({selection:{type:'boolean'}},[]),{selection:true},'read',modes,'Reading editor context'),
  question:define('Pause this task for a necessary user decision. Ask one focused question, with optional choices. Do not ask permission for edits here; use the normal approval flow.',object({text:string('Question',1000,1),options:{type:'array',items:string('Choice',160,1),minItems:2,maxItems:5}},['text']),{text:'Which behavior do you want?',options:['Option A','Option B']},'interaction',modes,'Waiting for your answer'),
  readOutput:define('Read the next page of a stored tool result using its opaque output ID. Never guess IDs.',object({id:string('Output ID',36,1),offset:integer(0,10000000)},['id']),{id:'ID from a tool result',offset:0},'read',modes,'Reading tool output'),
  symbols:define('Query IDE language services: document symbols, definition or references at a 1-based line/character. Availability depends on the language extension.',object({path:file,operation:{type:'string',enum:['document','definition','references']},line:integer(1,10000000),character:integer(1,100000)},['path']),{path:'src/file.ts',operation:'document'},'read',modes,'Inspecting symbols'),
@@ -51,22 +51,45 @@ export function allowedActions(mode:Mode,conversationOnly=false):Action['action'
  return conversationOnly?['finish']:(Object.keys(registry) as Action['action'][]).filter(name=>registry[name].modes.includes(mode));
 }
 export function toolInstructions(mode:Mode):string{return allowedActions(mode).map(name=>catalog[name]).join('\n');}
-function check(value:unknown,s:Schema):boolean{
- if(s.type==='string')return typeof value==='string'&&(s.minLength===undefined||value.length>=s.minLength)&&(s.maxLength===undefined||value.length<=s.maxLength)&&(!s.enum||s.enum.includes(value));
- if(s.type==='integer')return Number.isSafeInteger(value)&&(s.minimum===undefined||Number(value)>=s.minimum)&&(s.maximum===undefined||Number(value)<=s.maximum);
- if(s.type==='boolean')return typeof value==='boolean';
- if(s.type==='array')return Array.isArray(value)&&value.length>=(s.minItems||0)&&value.length<=(s.maxItems??Infinity)&&value.every(v=>check(v,s.items!));
- if(!value||typeof value!=='object'||Array.isArray(value))return false;
- const record=value as Record<string,unknown>;return !(s.required||[]).some(k=>!Object.hasOwn(record,k))&&Object.keys(record).every(k=>!!s.properties?.[k]&&check(record[k],s.properties[k]));
+function argumentIssue(value:unknown,s:Schema,field='arguments'):string|undefined{
+ if(s.type==='string'){
+  if(typeof value!=='string')return field+' must be a string.';
+  if(s.minLength!==undefined&&value.length<s.minLength)return field+' must contain at least '+s.minLength+' characters.';
+  if(s.maxLength!==undefined&&value.length>s.maxLength)return field+' exceeds '+s.maxLength+' characters.';
+  if(s.enum&&!s.enum.includes(value))return field+' must be one of: '+s.enum.join(', ')+'.';
+  return;
+ }
+ if(s.type==='integer'){
+  if(!Number.isSafeInteger(value))return field+' must be an integer.';
+  if(s.minimum!==undefined&&Number(value)<s.minimum)return field+' must be at least '+s.minimum+'.';
+  if(s.maximum!==undefined&&Number(value)>s.maximum)return field+' must be at most '+s.maximum+'.';
+  return;
+ }
+ if(s.type==='boolean')return typeof value==='boolean'?undefined:field+' must be a boolean.';
+ if(s.type==='array'){
+  if(!Array.isArray(value))return field+' must be an array.';
+  if(value.length<(s.minItems||0)||value.length>(s.maxItems??Infinity))return field+' must contain '+(s.minItems||0)+' to '+(s.maxItems??'unlimited')+' items.';
+  for(let i=0;i<value.length;i++){const issue=argumentIssue(value[i],s.items!,field+'['+i+']');if(issue)return issue;}
+  return;
+ }
+ if(!value||typeof value!=='object'||Array.isArray(value))return field+' must be an object.';
+ const record=value as Record<string,unknown>;
+ for(const key of s.required||[])if(!Object.hasOwn(record,key))return field+'.'+key+' is required.';
+ for(const key of Object.keys(record)){
+  if(!s.properties||!Object.hasOwn(s.properties,key))return field+' contains an unknown field. Allowed fields: '+Object.keys(s.properties||{}).join(', ')+'.';
+  const issue=argumentIssue(record[key],s.properties[key],field+'.'+key);if(issue)return issue;
+ }
 }
+
 const literal=(value:string)=>!/[\*?\[\]{}\0]/.test(value)&&!value.startsWith('/')&&!/^[a-z]:/i.test(value)&&!value.split(/[\\/]/).includes('..');
 export function validateAction(value:unknown,mode:Mode,conversationOnly=false):Action{
  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Expected one JSON action object.');
  const {action,...args}=value as Record<string,unknown>;
- if(!allowedActions(mode,conversationOnly).includes(action as Action['action']))throw new Error('Action not allowed in this mode.');
+ if(!allowedActions(mode,conversationOnly).includes(action as Action['action']))throw new Error('Action '+JSON.stringify(typeof action==='string'?action.slice(0,80):null)+' is not allowed in '+mode+' mode'+(conversationOnly?' for a social message':'')+'. Allowed actions: '+allowedActions(mode,conversationOnly).join(', ')+'.');
  const name=action as Action['action'];
  if((name==='command'&&!String(args.command||'').trim())||(name==='finish'&&!String(args.text||'').trim())||(name==='question'&&!String(args.text||'').trim()))throw new Error('Text cannot be empty.');
- if(!check(args,registry[name].schema)||['path','cwd'].some(k=>typeof args[k]==='string'&&!literal(args[k] as string)))throw new Error('Invalid '+name+' arguments. Follow the tool schema and use literal relative paths.');
+ const issue=argumentIssue(args,registry[name].schema);if(issue)throw new Error('Invalid '+name+' arguments: '+issue);
+ for(const field of ['path','cwd'])if(typeof args[field]==='string'&&!literal(args[field] as string))throw new Error('Invalid '+name+' arguments: '+field+' must be a literal relative workspace path, without globs or parent traversal. Use list/search to discover file paths.');
  if(name==='read'&&Number(args.endLine??Infinity)<Number(args.startLine??1))throw new Error('Invalid line range.');
  if(name==='plan'&&new Set((args.items as ChecklistItem[]).map(i=>i.id)).size!==(args.items as ChecklistItem[]).length)throw new Error('Duplicate checklist IDs.');
  if(name==='symbols'&&args.operation&&args.operation!=='document'&&(!args.line||!args.character))throw new Error('Definition and references require line and character.');

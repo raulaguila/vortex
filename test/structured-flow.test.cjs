@@ -32,3 +32,15 @@ test('Auto tries native tools on unknown compatible endpoints and falls back onl
 test('native provider-specific requests omit tool definitions for synthesis rounds',()=>{
  for(const kind of ['openai','compatible','anthropic','gemini','ollama'])assert.equal('tools' in nativePayload(kind,'m','Summarize',[],[],budget).body,false);
 });
+
+test('native rejection feedback serializes matching tool errors for all provider formats',()=>{
+ const {rejectionFeedback}=require('../dist/turnProtocol');const turn={kind:'tool_use',text:'',stopReason:'tool_use',calls:[{id:'rejected-id',name:'read',arguments:{path:42}}]};
+ for(const kind of ['openai','compatible','ollama','anthropic','gemini']){
+  const history=rejectionFeedback('',turn,'ask',false,true,kind,'Invalid read arguments: arguments.path must be a string.');assert.equal(history[1].toolResult.id,'rejected-id');assert.equal(history[1].toolResult.status,'error');
+  const body=nativePayload(kind,'m','s',history,[],{tokens:8192,output:1024}).body;
+  if(kind==='anthropic'){assert.equal(body.messages[1].content[0].tool_use_id,'rejected-id');assert.equal(body.messages[1].content[0].is_error,true);}
+  else if(kind==='gemini'){assert.equal(body.contents[1].parts[0].functionResponse.id,'rejected-id');assert.equal(body.contents[1].parts[0].functionResponse.response.status,'error');}
+  else {assert.equal(body.messages[2].role,'tool');assert.equal(body.messages[2][kind==='ollama'?'tool_name':'tool_call_id'],kind==='ollama'?'read':'rejected-id');}
+ }
+ assert.throws(()=>turnActions({...turn,calls:[{id:'a',name:'read',arguments:'{"path":"a"}'}]},'ask'),/expected an object/);
+});

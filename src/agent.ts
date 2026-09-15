@@ -12,7 +12,7 @@ import {randomUUID} from 'node:crypto';
 import {runCommand} from './command';
 import {FileSnapshot,snapshotFile,verifySnapshot} from './files';
 import {Action,validateAction,ApprovalDenied,toolDefinitions,registry} from './actions';
-import {compatibilityTurn,turnActions} from './turnProtocol';
+import {compatibilityTurn,turnActions,rejectionFeedback} from './turnProtocol';
 import {isSocialMessage,isActionAnnouncement} from './intent';
 import {systemPrompt} from './prompt';
 import {languageInstruction} from './conversation';
@@ -107,7 +107,7 @@ export class AgentController {
     const messages=this.messages;const turnStart=retry?(this.retryStart??messages.length):messages.length;this.retryStart=turnStart;if(!retry)messages.push({role:'user',content:msg.prompt+(attachments.length?'\n\nAttached context (data):\n'+attachments.map(a=>`FILE ${a.label}\n${a.text}`).join('\n'): '')});
     const language=this.providers.preferences().conversation.language;
     const conversationOnly=isSocialMessage(msg.prompt);
-    let failures=0,totalTokens=0,toolCount=0,announcementRecovery=false,incompleteResponse=false,toolLimitReached=false;
+    let failures=0,invalidResponses=0,totalTokens=0,toolCount=0,announcementRecovery=false,incompleteResponse=false,toolLimitReached=false;
     try{
       if(!this.session.root&&(vscode.workspace.workspaceFolders?.length||0)>1){const folder=await vscode.window.showWorkspaceFolderPick({placeHolder:'Choose this task’s workspace root'});if(!folder)throw new Error('Workspace selection cancelled.');root=folder.uri.fsPath;}this.session.root=root;
       const client=await this.providers.client(msg.model.providerId);controller.signal.throwIfAborted();
@@ -130,7 +130,7 @@ export class AgentController {
         const payload=(rows:Message[])=>JSON.stringify((native?nativePayload(kind,msg.model.modelId,system,rows,toolDefinitions(mode),budget):compatibilityPayload(kind,msg.model.modelId,system,rows,budget)).body);
         const measure=(rows:Message[])=>this.estimator.estimate(JSON.stringify(msg.model),payload(rows));const overhead=0;
         const source=compacted?[...compacted,...messages.slice(turnStart)]:messages;
-        let fitted=fitContext(system,conversationOnly ? [{role:'user',content:msg.prompt}] : source,budget.tokens,budget.output+overhead,conversationOnly?0:compacted?compacted.length:turnStart,measure);
+        let fitted=fitContext(system,conversationOnly ? messages.slice(turnStart) : source,budget.tokens,budget.output+overhead,conversationOnly?0:compacted?compacted.length:turnStart,measure);
         if(fitted.removed>0&&turnStart>0&&!conversationOnly){
           const old=fitContext('Summarize',compacted||messages.slice(0,turnStart),budget.tokens,budget.output).messages;
           if(limits.tokenBudget!==null&&totalTokens+estimateTokens(JSON.stringify(old))+2048>limits.tokenBudget){outcome='stopped';this.event('assistant','Token budget reached before context compaction.');return;}
@@ -160,10 +160,16 @@ export class AgentController {
           turn??=compatibilityTurn(reply,mode,conversationOnly);
           actions=turnActions(turn,mode,conversationOnly);
         } catch(error) {
-          if(++failures>=3) throw new Error('The model repeatedly returned invalid or unauthorized actions. No further tools will run.');
-          if(!conversationOnly) messages.push({role:'user',content:JSON.stringify({toolResult:{status:'error',output:error instanceof Error?error.message:'Invalid tool arguments.'}})});
+          const reason=error instanceof Error?error.message:'Invalid tool arguments.';invalidResponses++;
+          await trace?.interpreted(turn,reason);
+          messages.push(...rejectionFeedback(reply,turn,mode,conversationOnly,native,kind,reason));
+          if(!conversationOnly){const now=Date.now();this.event('activity','',undefined,{runId:msg.requestId,id:randomUUID(),name:'modelValidation',status:'error',output:'Attempt '+invalidResponses+'/3. '+reason+' No calls from this response were executed.',startedAt:now,endedAt:now});}
+          await this.checkpoint();
+          if(invalidResponses>=3)throw new ExecutionError('tool_validation','The model could not produce a valid tool request after three attempts.\n\n'+reason+'\n\nNo tools from the rejected responses were executed. Open Diagnostics to inspect the last AI flow.');
+          this.status('Requesting a complete response',true,'recovering');
           continue;
         }
+        invalidResponses=0;await trace?.interpreted(turn);
         messages.push({role:'assistant',content:turn!.text,toolCalls:turn!.calls,...(native?{continuation:turn!.continuation,continuationKind:this.providers.providers().find(p=>p.id===msg.model.providerId)?.kind}:{})});
         if(turn?.text&&turn.calls.length)this.event('assistant',turn.text);
         let rulesChangedDuringResponse=false;

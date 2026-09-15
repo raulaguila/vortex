@@ -1,7 +1,7 @@
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
-import {decodeNative} from './native';
+import {decodeNative,Turn} from './native';
 import type {Kind,Message} from './providers';
 
 const calls=(items:any[])=>items.map(c=>({id:c.id,name:c.name||c.function?.name,input:typeof (c.input??c.function?.arguments)==='string'?(c.input??c.function.arguments):JSON.stringify(c.input??c.arguments??c.args??c.function?.arguments??{})}));
@@ -46,8 +46,22 @@ export class RunTrace {
  async response(index:number,result:unknown,error?:string,kind:Kind='compatible'){
  let response:any;
  if(error)response={content:'',tool_calls:[],stop_reason:'error',error};
- else try{const turn=decodeNative(kind,result);response={content:turn.text,tool_calls:calls(turn.calls),stop_reason:turn.stopReason};}catch{response={content:'',tool_calls:[],stop_reason:'invalid_response',raw_response:result};}
+ else try{const turn=decodeNative(kind,result);const normalized=turn.kind==='tool_use'?'tool_use':'stop';response={content:turn.text,tool_calls:calls(turn.calls),stop_reason:normalized,...(turn.stopReason!==normalized?{provider_stop_reason:turn.stopReason}:{})};}catch{response={content:'',tool_calls:[],stop_reason:'invalid_response',raw_response:result};}
  this.data.turns[index].response=response;await this.save();
+ }
+ /** Record host interpretation without losing what the provider actually returned. */
+ async interpreted(turn:Turn|undefined,validationError?:string){
+  const response=this.data.turns.at(-1)?.response;if(!response)return;
+  const original=response.provider_stop_reason??response.stop_reason;
+  const normalized=turn?(turn.calls.length?'tool_use':'stop'):'invalid_response';
+  if(original!==normalized)response.provider_stop_reason=original;
+  response.stop_reason=normalized;
+  if(turn){
+   if(response.content!==turn.text)response.provider_content??=response.content;
+   response.content=turn.text;response.tool_calls=calls(turn.calls);
+  }
+  if(validationError)response.validation_error=validationError;
+  await this.save();
  }
  async finish(status:string,history:Message[]){
  this.data.final_answer=status==='complete'?(history.at(-1)?.role==='assistant'?history.at(-1)!.content:''):'';

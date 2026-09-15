@@ -111,6 +111,7 @@ export class Client {
     }:undefined));
   }
   async chat(model:string, system:string, messages:Message[], signal:AbortSignal, budget?: {tokens:number;output:number}):Promise<string> {
+    this.trace?.prepare(system,messages);
     const request=compatibilityPayload(this.p.kind,model,system,messages,budget);
     return compatibilityAnswer(this.p.kind,await this.request(request.path,request.body,signal));
   }

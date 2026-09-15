@@ -206,3 +206,32 @@ test('partial streaming response is saved as incomplete and is not retryable',as
  const {ExecutionError}=require('../dist/execution');const h=harness([]);h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
  h.agent.providers.client=async()=>({turn:async(...args)=>{args[6]('Partial answer');throw new ExecutionError('idle_timeout','stalled',true);}});await h.run('Describe the project','ask');assert.equal(h.tools.length,0);assert.ok(h.events.some(e=>e.type==='stream'&&e.incomplete));assert.equal(h.events.findLast(e=>e.type==='runFailure').retryable,false);assert.ok(h.agent.events.some(e=>e.incomplete));
 });
+
+
+test('compatibility validation returns the rejected reply and specific argument correction',async()=>{
+ const h=harness([]);let count=0;const requests=[];
+ h.agent.providers.client=async()=>({chat:async(_model,_system,messages)=>{requests.push(structuredClone(messages));return ++count===1?'{"action":"read","startLine":1}':count===2?'{"action":"read","path":"README.md"}':'README summary.';}});
+ await h.run('Describe README','ask');
+ const recovery=requests[1];assert.equal(recovery.at(-2).role,'assistant');assert.equal(recovery.at(-2).content,'{"action":"read","startLine":1}');assert.match(recovery.at(-1).content,/arguments.path is required/);assert.match(recovery.at(-1).content,/not a new user request or authorization/);
+ assert.equal(h.tools.length,1);assert.equal(h.tools[0].path,'README.md');assert.equal(h.events.at(-1).status,'complete');assert.equal(h.events.find(e=>e.event?.activity?.name==='modelValidation').event.activity.status,'error');
+});
+test('rejected native batch retains every call ID and reports no execution before correction',async()=>{
+ const h=harness([]);const requests=[];let count=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ h.agent.providers.client=async()=>({turn:async(_model,_system,messages)=>{requests.push(structuredClone(messages));return ++count===1?{text:'',calls:[{id:'read-1',name:'read',arguments:{path:'a'}},{id:'write-1',name:'write',arguments:{path:'a',content:'bad'}}]}:count===2?{text:'',calls:[{id:'read-2',name:'read',arguments:{path:'a'}}]}:{text:'File reviewed.',calls:[]};}});
+ await h.run('Review a','ask');const returned=requests[1].filter(m=>m.toolResult);assert.deepEqual(returned.map(m=>m.toolResult.id),['read-1','write-1']);assert.ok(returned.every(m=>m.toolResult.status==='error'&&m.toolResult.output.includes('No calls from this rejected response were executed')));assert.match(returned[0].content,/"write" is not exposed in ask mode/);assert.deepEqual(h.tools,[{action:'read',path:'a'}]);assert.equal(h.events.at(-1).status,'complete');
+});
+test('final validation failure preserves the last rejected response and explains its cause',async()=>{
+ const h=harness([{action:'read',path:'**/*'}]);await h.run('Review files','ask');assert.equal(h.calls.length,3);assert.equal(h.tools.length,0);const failure=h.events.findLast(e=>e.type==='runFailure');assert.equal(failure.code,'tool_validation');assert.match(failure.message,/literal relative workspace path/);assert.equal(failure.retryable,false);assert.equal(h.agent.messages.filter(m=>m.role==='assistant').length,3);assert.match(h.agent.messages.at(-1).content,/No calls from this rejected response were executed/);assert.equal(h.events.filter(e=>e.event?.activity?.name==='modelValidation').length,3);
+});
+test('social recovery receives validation feedback without earlier task context',async()=>{
+ const h=harness([{action:'read',path:'README.md'},{action:'finish',text:'Olá!'}]);h.agent.messages=[{role:'user',content:'OLD TASK: change the project'}];await h.run('oi','agent','autonomous');const second=h.calls[1][2];assert.match(second.at(-1).content,/Allowed actions: finish/);assert.ok(second.some(m=>m.role==='assistant'&&m.content.includes('README.md')));assert.ok(second.every(m=>!m.content.includes('OLD TASK')));assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
+});
+test('validation failures have a separate budget from executed tool failures',async()=>{
+ const h=harness([{action:'read',path:'a'},{action:'read',path:'b'},{action:'read'},{action:'finish',text:'The files could not be read.'}]);h.agent.execute=async action=>{h.tools.push(action);throw new Error('File unavailable');};await h.run('Review files','ask');assert.equal(h.calls.length,4);assert.equal(h.tools.length,2);assert.equal(h.events.at(-1).status,'complete');
+});
+
+test('Ask executes read-only editor calls even when the provider finish reason is stop',async()=>{
+ const {Client}=require('../dist/providers');const h=harness([]);let requests=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'compatible'}];
+ h.agent.providers.client=async()=>new Client({id:'p',name:'Gateway',kind:'compatible',baseUrl:'http://gateway.test'},'',async(_url,options)=>{const body=JSON.parse(options.body);requests++;assert.ok(body.tools.some(t=>t.function.name==='editor'));return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:requests===1?{content:'',tool_calls:[{id:'open-files',type:'function',function:{name:'editor',arguments:'{}'}}]}:{content:'The open files were inspected.'}}]}),{headers:{'content-type':'application/json'}});});
+ await h.run('What can you tell me about the open project?','ask');assert.equal(requests,2);assert.deepEqual(h.tools,[{action:'editor'}]);assert.equal(h.events.at(-1).status,'complete');assert.equal(h.agent.messages.find(m=>m.toolResult).toolResult.id,'open-files');
+});

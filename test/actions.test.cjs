@@ -18,3 +18,10 @@ test('invalid tools, arguments and paths are rejected before execution',()=>{
   for(const mode of ['ask','plan'])for(const action of ['write','edit','command'])assert.throws(()=>validateAction({action},mode));
   assert.throws(()=>validateAction({action:'plan',items:[{id:'a',text:'x',status:'pending'}]},'ask'));
 });
+
+test('tool argument failures identify the exact field without exposing values',()=>{
+ assert.throws(()=>validateAction({action:'read'},'ask'),/arguments.path is required/);
+ assert.throws(()=>validateAction({action:'read',path:'a',startLine:'1'},'ask'),/arguments.startLine must be an integer/);
+ assert.throws(()=>validateAction({action:'plan',items:[{id:'a',text:'Inspect',status:'complete'}]},'plan'),/arguments.items\[0\].status must be one of: pending, running, done/);
+ assert.throws(()=>validateAction({action:'list',secret:'do-not-include-me'},'ask'),e=>e.message.includes('unknown field')&&!e.message.includes('do-not-include-me'));
+});

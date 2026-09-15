@@ -16,6 +16,16 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Versão 0.7.2
+
+- Respostas rejeitadas recebem retorno específico por campo. Chamadas nativas mantêm os IDs originais e recebem um resultado de erro antes da próxima rodada; nenhum item de um lote rejeitado é executado.
+- O limite de três respostas inválidas é independente de falhas durante a execução das ferramentas. O chat mostra o motivo da rejeição e acesso às configurações do modelo e ao diagnóstico.
+- `editor` é uma ferramenta de leitura dos arquivos abertos/seleção e está disponível em Ask. As ferramentas de escrita continuam restritas ao Agent.
+- O fluxo JSON usa `stop_reason: tool_use` para chamadas interpretadas, mesmo quando o provedor retorna `stop`. O valor original fica em `provider_stop_reason` quando diferente; ações textuais originais ficam em `provider_content`, e rejeições incluem `validation_error`. Os campos principais do envelope permanecem iguais.
+- A versão instalada aparece no cabeçalho das configurações desde a 0.7.1.
+
+Ver [validação da 0.7.2](docs/validation-0.7.2.md).
+
 ## Versão 0.7.0
 
 - Input com 12 px internos, margem externa de 16 px, controles espaçados e layout em duas linhas na sidebar estreita.

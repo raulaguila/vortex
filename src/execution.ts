@@ -9,7 +9,7 @@ export function migrateExecution(v:any):ExecutionPreferences{
  const merged={...d,...v,maxRounds:v.maxRounds??v.maxSteps??d.maxRounds,maxToolCalls:v.maxToolCalls??v.maxSteps??d.maxToolCalls,firstResponseTimeout:v.firstResponseTimeout??v.modelTimeout??d.firstResponseTimeout,idleTimeout:v.idleTimeout??v.modelTimeout??d.idleTimeout};
  return Object.fromEntries(Object.keys(d).map(k=>[k,validExecution({...d,[k]:merged[k]})?merged[k]:d[k as keyof ExecutionPreferences]])) as unknown as ExecutionPreferences;
 }
-export type FailureCode='cancelled'|'first_response_timeout'|'idle_timeout'|'task_timeout'|'command_timeout'|'transport'|'authentication'|'provider'|'invalid_response';
+export type FailureCode='cancelled'|'first_response_timeout'|'idle_timeout'|'task_timeout'|'command_timeout'|'transport'|'authentication'|'provider'|'invalid_response'|'tool_validation';
 export class ExecutionError extends Error{constructor(readonly code:FailureCode,message:string,readonly retryable=false){super(message);}}
 export async function awaitApproval<T>(request:()=>PromiseLike<T>,signal?:AbortSignal):Promise<T>{
  signal?.throwIfAborted();let cancel:()=>void=()=>{};

@@ -63,11 +63,11 @@ function addEvent(event) {
 function activityRow(event){
  const pt=window.VortexUI.language()==='pt',details=create('details','activity');
  const [raw,...legacyLines]=event.text.split('\n'),parts=raw.split(' · '),tool=event.activity?.name||parts[0],status=event.activity?.status||(['success','error','denied'].includes(parts.at(-1))?parts.pop():null),lines=event.activity?event.activity.output.split('\n'):legacyLines;
- const labels={multiEdit:['Edited file','Alterou arquivo','edit'],editor:['Read editor context','Leu contexto do editor','eye'],question:['Asked for clarification','Solicitou esclarecimento','ask'],readOutput:['Read more output','Leu mais resultados','eye'],symbols:['Inspected symbols','Consultou símbolos','search'],skill:['Read project skill','Leu instruções do projeto','eye'],list:['Listed project files','Listou arquivos do projeto','plan'],read:['Read file','Leu arquivo','eye'],search:['Searched the project','Pesquisou no projeto','search'],diagnostics:['Checked diagnostics','Verificou diagnósticos','search'],plan:['Updated the plan','Atualizou o plano','plan'],write:['Wrote file','Gravou arquivo','edit'],edit:['Edited file','Alterou arquivo','edit'],remove:['Removed file','Removeu arquivo','trash'],command:['Ran command','Executou comando','agent']};
+ const labels={modelValidation:['Model response rejected','Resposta do modelo rejeitada','ask'],multiEdit:['Edited file','Alterou arquivo','edit'],editor:['Read editor context','Leu contexto do editor','eye'],question:['Asked for clarification','Solicitou esclarecimento','ask'],readOutput:['Read more output','Leu mais resultados','eye'],symbols:['Inspected symbols','Consultou símbolos','search'],skill:['Read project skill','Leu instruções do projeto','eye'],list:['Listed project files','Listou arquivos do projeto','plan'],read:['Read file','Leu arquivo','eye'],search:['Searched the project','Pesquisou no projeto','search'],diagnostics:['Checked diagnostics','Verificou diagnósticos','search'],plan:['Updated the plan','Atualizou o plano','plan'],write:['Wrote file','Gravou arquivo','edit'],edit:['Edited file','Alterou arquivo','edit'],remove:['Removed file','Removeu arquivo','trash'],command:['Ran command','Executou comando','agent']};
  const known=labels[tool],summary=create('summary'),copy=create('span','activity-description');summary.append(choiceIcon(known?.[2]||'plan'));
- const label=status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
+ const label=tool==='modelValidation'?known[pt?1:0]:status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
  copy.append(create('span','activity-label',label));
- const detail=known?(event.activity?.path||parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
+ const detail=known&&tool!=='modelValidation'?(event.activity?.path||parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
  if(detail)copy.append(create('span','activity-path',detail));summary.append(copy);
  if(status==='error'||status==='denied'){details.dataset.status=status;summary.append(create('span','activity-result',status==='error'?'!':'−'));}
  if(Number.isFinite(event.durationMs)&&event.durationMs>=0){const seconds=event.durationMs/1000;summary.append(create('span','activity-duration',(seconds<1?'<1':Math.round(seconds))+'s'));}
@@ -252,6 +252,6 @@ window.addEventListener('message',({data:m})=>{
  if(m.type==='runFailure'){
   recovery.replaceChildren();recovery.hidden=false;
   const add=(label,type,data)=>{const b=create('button','',window.VortexUI.t(label));b.onclick=()=>{request(type,data||{});if(type==='retry')recovery.hidden=true;};recovery.append(b);};
-  if(m.retryable)add('Try again','retry');if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
+  if(m.retryable)add('Try again','retry');if(m.code==='tool_validation')add('Open settings','openSettings',{section:'models'});if(['authentication','provider','first_response_timeout','idle_timeout'].includes(m.code))add('Open settings','openSettings',{section:m.code==='authentication'?'providers':'execution'});add('View diagnostics','openSettings',{section:'diagnostics'});
  }
 });
