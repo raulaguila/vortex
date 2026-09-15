@@ -42,8 +42,9 @@ function addEvent(event) {
  if(event.role==='activity'){
    let group=timeline.lastElementChild;
    if(!group?.classList.contains('activity-group')){group=create('details','activity-group');group.append(create('summary'));group.dataset.count='0';timeline.append(group);}
-   group.dataset.count=String(Number(group.dataset.count)+1);group.querySelector('summary').textContent=window.VortexUI.t('Activities')+' · '+group.dataset.count;
-   const details=create('details','activity');const [title,...body]=event.text.split('\n');details.append(create('summary','',title),create('pre','',body.join('\n')));group.append(details);
+   group.dataset.count=String(Number(group.dataset.count)+1);
+   group.querySelector('summary').textContent=(window.VortexUI.language()==='pt'?'Trabalho realizado':'Work details')+' · '+group.dataset.count;
+   group.append(activityRow(event));
  }else{
    const item=create('article',event.role);item.setAttribute('aria-label',event.role==='user'?window.VortexUI.t('You'):'Vortex');
    const bubble=create('div','message-content'),body=markdownBody(event.text,event.role);bubble.append(body);
@@ -57,6 +58,24 @@ function addEvent(event) {
    item.append(actions);timeline.append(item);
  }
  if(follow||event.role==='user')timeline.scrollTop=timeline.scrollHeight;
+}
+function activityRow(event){
+ const pt=window.VortexUI.language()==='pt',details=create('details','activity');
+ const [raw,...lines]=event.text.split('\n'),parts=raw.split(' · '),tool=parts[0],status=['success','error','denied'].includes(parts.at(-1))?parts.pop():null;
+ const labels={list:['Listed project files','Listou arquivos do projeto','plan'],read:['Read file','Leu arquivo','eye'],search:['Searched the project','Pesquisou no projeto','search'],diagnostics:['Checked diagnostics','Verificou diagnósticos','search'],plan:['Updated the plan','Atualizou o plano','plan'],write:['Wrote file','Gravou arquivo','edit'],edit:['Edited file','Alterou arquivo','edit'],remove:['Removed file','Removeu arquivo','trash'],command:['Ran command','Executou comando','agent']};
+ const known=labels[tool],summary=create('summary'),copy=create('span','activity-description');summary.append(choiceIcon(known?.[2]||'plan'));
+ const label=status==='denied'?(pt?'Ação não autorizada':'Action declined'):status==='error'?(pt?'Falha na ação':'Action failed'):known?.[pt?1:0]||raw;
+ copy.append(create('span','activity-label',label));
+ const detail=known?(parts.slice(1).join(' · ')||((status==='denied'||status==='error')?known[pt?1:0]:'')):'';
+ if(detail)copy.append(create('span','activity-path',detail));summary.append(copy);
+ if(status==='error'||status==='denied'){details.dataset.status=status;summary.append(create('span','activity-result',status==='error'?'!':'−'));}
+ if(Number.isFinite(event.durationMs)&&event.durationMs>=0){const seconds=event.durationMs/1000;summary.append(create('span','activity-duration',(seconds<1?'<1':Math.round(seconds))+'s'));}
+ details.append(summary);
+ const output=create('div','activity-output');
+ if(tool==='list'&&status==='success'){
+   const files=create('ul','activity-files');for(const line of lines.filter(Boolean)){const li=create('li');li.append(create('span','',line));files.append(li);}output.append(files);
+ }else output.append(create('pre','',lines.join('\n')));
+ details.append(output);return details;
 }
 function welcome(){delete $('chat-heading').dataset.title;$('chat-heading').title='';contextUsage=null;renderContext();$('close-chat').hidden=true;$('chat-heading').querySelector('span').textContent=window.VortexUI.t('Chats');$('timeline').replaceChildren();const el=create('div','welcome');el.id='welcome';const img=create('img','empty-symbol');img.src=document.querySelector('.brand img').src;img.alt='Vortex';el.append(img);$('timeline').append(el);renderRecent();}
 function renderSelection() {
@@ -209,10 +228,10 @@ window.addEventListener('message',({data:m})=>{
 
 const taskActions=create('div','task-actions');
 for(const [type,en,pt] of [['resume','Continue','Continuar'],['implementPlan','Implement plan','Implementar plano'],['reviewChanges','Review changes','Revisar alterações'],['undoChanges','Undo task changes','Desfazer alterações']]){
- const button=create('button','',window.VortexUI.language()==='pt'?pt:en);button.type='button';button.onclick=()=>request(type);button.dataset.taskAction=type;taskActions.append(button);
+ const button=create('button','',window.VortexUI.language()==='pt'?pt:en);button.type='button';button.onclick=()=>request(type);button.dataset.taskAction=type;button.dataset.en=en;button.dataset.pt=pt;taskActions.append(button);
 }
 $('timeline').after(taskActions);
-window.addEventListener('message',({data:m})=>{if(m.type==='history'){taskActions.hidden=!m.events.length;}if(m.type==='event')taskActions.hidden=false;if(m.type==='status')taskActions.querySelectorAll('button').forEach(b=>b.disabled=m.busy);});
+window.addEventListener('message',({data:m})=>{if(['history','event','status','state'].includes(m.type)){taskActions.hidden=busy||!$('timeline').querySelector('article');taskActions.querySelectorAll('button').forEach(b=>{b.disabled=busy;b.textContent=b.dataset[window.VortexUI.language()==='pt'?'pt':'en'];});}});
 taskActions.hidden=true;
 
 const attachedContext=create('div','attached-context');document.querySelector('.composer').prepend(attachedContext);

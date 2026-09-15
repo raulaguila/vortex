@@ -15,7 +15,7 @@ export interface ModelLimits { tools?: boolean; input: number | null; output: nu
 export interface ChecklistItem { id: string; text: string; status: 'pending' | 'running' | 'done' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
 export interface SettingsState {effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
-export interface AgentEvent { role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number }
+export interface AgentEvent { role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
 export type Request = (
   | { type: 'ready'; legacySelection?: ModelRef }
   | { type: 'saveProvider' | 'testProvider'; provider: ProviderInput }

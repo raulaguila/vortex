@@ -16,7 +16,7 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
-## Versão 0.4.2
+## Versão 0.4.3
 
 O transporte OpenAI-compatible usa HTTP/HTTPS do Node, com TLS insecure aplicado por requisição. URLs base sem `/v1` são suportadas: o catálogo usa `<base>/models` e o chat `<base>/chat/completions`. Redirecionamentos são informados sem encaminhar chaves; falhas conhecidas de DNS, rede e certificado têm diagnóstico específico. A comparação e os testes estão em [docs/forge-connection-review.md](docs/forge-connection-review.md).
 
@@ -29,6 +29,8 @@ Em **Settings → Models**, cada modelo oferece **Auto**, **Native tools** ou **
 Tools nativas têm streaming, IDs de chamadas/resultados e validação antes de execução. A alternativa textual continua exigindo JSON completo e validado. Streams interrompidos e argumentos parciais não executam ferramentas. A qualidade das decisões continua dependendo do modelo escolhido.
 
 O chat mostra um indicador visível durante a execução: preparação, espera pelo modelo, recebimento da resposta, leitura/pesquisa de arquivos, execução de ferramentas e espera por aprovação. O estado atual é restaurado ao reabrir a sidebar e o indicador desaparece ao concluir, falhar ou interromper.
+
+As atividades concluídas ficam agrupadas em um resumo recolhível, com nomes legíveis, ícones, arquivo envolvido e duração quando registrada. Detalhes técnicos só aparecem ao expandir a atividade; sessões antigas continuam compatíveis.
 
 ### Modos e permissões
 

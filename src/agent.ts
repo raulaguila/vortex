@@ -58,7 +58,7 @@ export class AgentController {
   async load(id:string) { if(this.busy)throw new Error('Stop the current task before opening a session.');const revision=++this.navigationVersion; const session=await this.sessions.load(id);if(this.busy||revision!==this.navigationVersion)throw new Error('Session navigation was superseded.'); this.session=session;this.events=session.events;this.messages=session.messages;this.checklist=session.checklist;this.statusText='Ready';this.history();this.post({type:'sessionLoaded',mode:session.mode,permission:session.permission,model:session.model}); }
   async removeSession(id:string) {if(this.busy)throw new Error('Stop the current task first.');await this.sessions.remove(id);if(this.session?.id===id)this.clear();}
   private async checkpoint() {if(this.session){this.session.events=this.events;this.session.messages=this.messages;this.session.checklist=this.checklist;await this.sessions.save(this.session);}}
-  private event(role: AgentEvent['role'], text: string) { const event = {role,text,timestamp:Date.now()}; this.events.push(event); this.post({type:'event',event}); }
+  private event(role: AgentEvent['role'], text: string, durationMs?:number) { const event = {role,text,timestamp:Date.now(),...(durationMs===undefined?{}:{durationMs})}; this.events.push(event); this.post({type:'event',event}); }
   private status(text: string, busy: boolean) { this.statusText = text; this.post({type:'status',busy,text}); }
   async start(msg: Extract<Request, {type: 'start'}>,attachments:Attachment[]=[]){
     if(this.run)throw new Error('Já existe uma tarefa em execução.');
@@ -148,7 +148,7 @@ export class AgentController {
           catch(e){if(controller.signal.aborted)throw e;status=e instanceof ApprovalDenied?'denied':'error';result=(e as Error).message;failures++;}
           this.session.pendingTool=undefined;
           this.post({type:'toolProgress',id:toolId,name:action.action,status,elapsed:Date.now()-started});this.activeTool=undefined;
-          this.event('activity',`${action.action}${'path' in action?' · '+action.path:''} · ${status}\n${result.slice(0,1500)}`);
+          this.event('activity',`${action.action}${'path' in action?' · '+action.path:''} · ${status}\n${result.slice(0,1500)}`,Date.now()-started);
           const output=result.slice(0,Math.max(512,Math.floor(budget.tokens/4)));
           messages.push({role:'user',content:JSON.stringify({toolResult:{status,output}}),...(turn?{toolResult:{id:turn.calls[index].id,name:turn.calls[index].name,status,output}}:{})});await this.checkpoint();
           if(status==='denied'){

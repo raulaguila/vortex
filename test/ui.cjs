@@ -104,6 +104,11 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   const longMessage='Please improve the account screen.\n'.repeat(24);
   await post(chat,{type:'history',events:[{role:'user',text:longMessage,timestamp:Date.now()},{role:'activity',text:'read · account.ts · success\nRead 80 lines.'},{role:'activity',text:'edit · account.ts · denied\nApproval denied.'},{role:'assistant',text:'## Account screen\nThe edit was **not applied** because approval was declined.\n\n- Existing files are unchanged.\n- You can review the proposed implementation.\n\n```ts\nconst enabled = true;\n```',timestamp:Date.now()}],busy:false,status:'Ready'});
   await chat.locator('.expand-message').waitFor();assert.equal(await chat.locator('.activity-group').count(),1);assert.equal(await chat.locator('.activity-group .activity').count(),2);
+  assert.equal(await chat.locator('.activity-group').getAttribute('open'),null);
+  await chat.locator('.activity-group > summary').click();assert.equal(await chat.locator('.activity-label').first().innerText(),'Read file');assert.equal(await chat.locator('.activity-label').nth(1).innerText(),'Action declined');
+  assert.equal(await chat.locator('.activity-path').first().innerText(),'account.ts');await chat.locator('.activity > summary').first().click();assert.equal(await chat.locator('.activity-output pre').first().innerText(),'Read 80 lines.');
+  await chat.setViewportSize({width:360,height:800});await chat.screenshot({path:path.join(output,'activity-details-360.png')});await chat.locator('.activity-group > summary').click();
+
   await chat.locator('.expand-message').click();assert.equal(await chat.locator('.message-collapsed').count(),0);await chat.locator('.expand-message').click();
   await chat.locator('article.user').getByRole('button',{name:'Copy message'}).click();await chat.waitForFunction(()=>document.querySelector('article.user .message-action').title==='Copied');assert.equal(copied,longMessage);
   const startsBefore=startCount;await chat.locator('article.user').getByRole('button',{name:'Reuse message'}).click();assert.equal(await chat.locator('#prompt').inputValue(),longMessage);assert.equal(startCount,startsBefore);await chat.locator('#prompt').fill('');
