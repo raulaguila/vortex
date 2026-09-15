@@ -145,6 +145,7 @@ window.addEventListener('message',({data:m})=>{
  if(m.type==='status'){updateBusy(m.busy);return;}
  if(m.type==='settingsSection'){switchSection(m.section);return;}
  if(m.type!=='result')return;const context=pending.get(m.requestId);pending.delete(m.requestId);if(!context)return;
+ if(context.type==='setExecution'){executionPending=false;saveExecution.disabled=false;executionForm.querySelectorAll('input').forEach(input=>input.disabled=false);if(m.ok)executionDirty=false;notice('execution-notice',m.ok?window.VortexUI.t('Execution limits saved.'):m.message||window.VortexUI.t('Could not save execution limits.'),!m.ok);return;}
  if(['saveProvider','testProvider'].includes(context.type)){
   if(context.revision!==formRevision||formPending?.id!==m.requestId)return;formPending=null;$('test-provider').textContent='Testar conexão';$('save-provider').textContent='Salvar';
   if(m.ok&&context.type==='saveProvider'){editingId=m.providerId;$('form-title').textContent='Editar conexão';$('provider-key').value='';$('clear-key').checked=false;keyHelp();}
@@ -174,14 +175,16 @@ $('inspect-context').onclick=()=>{const model=contextRef();if(model)request('mod
 $('context-source').onchange=()=>{const api=$('context-source').value==='api';$('context-tokens').disabled=api;if(api){const ref=contextRef();$('context-tokens').value=state.limits?.[ref?modelKey(ref):'']?.input||16384;}};
 $('save-context').onclick=()=>{const model=contextRef();if(!model||!$('context-tokens').reportValidity())return;request('setContext',{model,source:$('context-source').value,tokens:Number($('context-tokens').value)});};
 
-const executionForm=create('form','execution-settings');executionForm.append(create('h2','','Execution limits'));
+let executionDirty=false,executionPending=false;
+const executionForm=create('form','execution-settings');executionForm.append(create('h2','','Execution limits'),create('p','section-description','Control how long each task can run. Save changes below.'));
 for(const [name,label,value,min,max] of [['maxSteps','Steps per turn',20,1,200],['modelTimeout','Model response timeout (seconds)',120,1,3600],['commandTimeout','Command timeout (seconds)',60,1,3600],['taskTimeout','Task timeout (seconds)',1800,1,86400],['tokenBudget','Token budget (empty = unlimited)','',1024,100000000]]){
- const labelEl=create('label','',label),input=create('input');input.type='number';input.min=min;input.max=max;input.value=value;input.name=name;if(name!=='tokenBudget')input.required=true;labelEl.append(input);executionForm.append(labelEl);
+ const row=create('div','preference-row'),labelEl=create('label','',label),input=create('input');input.type='number';input.min=min;input.max=max;input.step='1';input.value=value;input.name=name;input.id='execution-'+name;labelEl.htmlFor=input.id;if(name!=='tokenBudget')input.required=true;row.append(labelEl,input);executionForm.append(row);
 }
 executionForm.append(create('p','','Model timeout applies to each response, including streaming, starting with the next task. The total task limit can interrupt it earlier.'));
-const saveExecution=create('button','','Save execution limits');saveExecution.type='submit';executionForm.append(saveExecution);$('section-conversation').append(executionForm);
-executionForm.onsubmit=e=>{e.preventDefault();const values=Object.fromEntries([...executionForm.elements].filter(e=>e.name).map(e=>[e.name,e.value===''?null:Number(e.value)]));request('setExecution',{execution:values});};
-window.addEventListener('message',({data:m})=>{if(m.type==='state'&&m.state.preferences.execution&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});
+const saveExecution=create('button','primary-button','Save execution limits');saveExecution.type='submit';const executionActions=create('div','execution-actions'),executionNotice=create('p','');executionNotice.id='execution-notice';executionNotice.setAttribute('role','status');executionNotice.setAttribute('aria-live','polite');executionActions.append(saveExecution,executionNotice);executionForm.append(executionActions);$('section-conversation').append(executionForm);
+executionForm.oninput=()=>{executionDirty=true;notice('execution-notice',window.VortexUI.t('Unsaved changes.'));};
+executionForm.onsubmit=e=>{e.preventDefault();if(executionPending)return;const values=Object.fromEntries([...executionForm.elements].filter(e=>e.name).map(e=>[e.name,e.value===''?null:Number(e.value)]));executionPending=true;saveExecution.disabled=true;executionForm.querySelectorAll('input').forEach(input=>input.disabled=true);notice('execution-notice',window.VortexUI.t('Saving…'));request('setExecution',{execution:values});};
+window.addEventListener('message',({data:m})=>{if(m.type==='state'&&m.state.preferences.execution&&!executionDirty&&!executionPending&&!executionForm.contains(document.activeElement))for(const [name,value]of Object.entries(m.state.preferences.execution))if(executionForm.elements.namedItem(name))executionForm.elements.namedItem(name).value=value??'';});
 
 const sandboxSection=create('section','execution-settings');sandboxSection.append(create('h2','','Isolated commands'),create('p','','Autonomous commands use a local Docker container. Without Docker, commands require host approval. Network is off by default.'));
-const setupSandbox=create('button','','Download sandbox image');setupSandbox.onclick=()=>request('setupSandbox');sandboxSection.append(setupSandbox);$('section-conversation').append(sandboxSection);
+const setupSandbox=create('button','secondary-button','Download sandbox image');setupSandbox.onclick=()=>request('setupSandbox');sandboxSection.append(setupSandbox);$('section-conversation').append(sandboxSection);

@@ -53,3 +53,12 @@ h3 { font-size: 12px; font-weight: 600; margin: 0 0 7px; }
 .context-settings input { display:block;width:100%;background:var(--input);color:var(--fg);border:1px solid var(--line);padding:8px;border-radius:4px;margin-bottom:10px; }
 .context-settings .primary-button { margin-bottom:12px; }
 #context-limit { margin-top:8px;font-size:11px; }
+
+.execution-settings { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.execution-settings h2 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+.execution-settings > p { font-size: 11px; margin: 12px 0; }
+.execution-settings .section-description { margin: 0 0 8px; }
+.execution-settings input { width: 100%; min-width: 0; color: var(--vscode-input-foreground,var(--fg)); background: var(--input); border: 1px solid var(--line); border-radius: 4px; padding: 7px 8px; font-size: 12px; }
+.execution-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.execution-actions p { margin: 0; font-size: 11px; }
+.execution-settings .secondary-button { border: 1px solid var(--line); margin-top: 4px; }
