@@ -10,6 +10,7 @@ import { RunTrace } from './trace';
 import { contentVersion } from './contentVersion';
 import type { EditorContext } from './editorContext';
 import { ToolOutputs } from './toolOutputs';
+import { storeOutput } from './utils/outputStore';
 import { toolPresentation } from './toolPresentation';
 
 import { randomUUID } from 'node:crypto';
@@ -365,10 +366,11 @@ export class AgentRuntime {
           catch(e){if(e&&typeof e==='object'&&'commandEvidence' in e)commandEvidence=e.commandEvidence as CommandEvidence;if(controller.signal.aborted||e instanceof ExecutionError&&['command_timeout','uncertain_outcome','cancelled','task_timeout','persistence'].includes(e.code))throw e;status=e instanceof ApprovalDenied?'denied':'error';result=(e as Error).message;failures++;}
           this.session.pendingTool=undefined;
           this.flushCommandOutput();this.post({type:'toolProgress',runId:this.progress?.runId,id:toolId,name:action.action,status,elapsed:Date.now()-started});this.activeTool=undefined;
-          const output=this.outputs.preserve(result,Math.min(this.outputLimit,4000));let retained:{output_id?:string}={};try{retained=JSON.parse(output);}catch{}const presented=toolPresentation(action.action,result);
-          this.event('activity','',Date.now()-started,{...(evidencePlan?{plan:{planId:evidencePlan.state.plan_id,version:evidencePlan.state.version,stepId:evidencePlan.state.active_step!,attempt:evidencePlan.attempt!.number}}:{}),sessionId:this.session.id,runId:msg.requestId,id:toolId,name:action.action,...('path' in action?{path:action.path}:{}),status,output:presented.slice(0,4000),outputRef:retained.output_id,truncated:presented.length>4000,startedAt:started,endedAt:Date.now()});
-          if(evidencePlan&&action.action!=='propose_plan'&&action.action!=='report_step_result'){evidencePlan.record({id:evidenceId,tool:action.action,status,...('path' in action?{path:action.path}:{}),command:commandEvidence,outputRef:retained.output_id,timestamp:Date.now()});this.planState();}
-          const evidenceOutput=controlled?JSON.stringify({evidence_id:evidenceId,result:output}):output;
+          const stored=storeOutput(this.outputs,result,Math.min(this.outputLimit,4000));
+const presented=toolPresentation(action.action,result);
+          this.event('activity','',Date.now()-started,{...(evidencePlan?{plan:{planId:evidencePlan.state.plan_id,version:evidencePlan.state.version,stepId:evidencePlan.state.active_step!,attempt:evidencePlan.attempt!.number}}:{}),sessionId:this.session.id,runId:msg.requestId,id:toolId,name:action.action,...('path' in action?{path:action.path}:{}),status,output:presented.slice(0,4000),outputRef:stored.outputRef,truncated:stored.truncated,startedAt:started,endedAt:Date.now()});
+          if(evidencePlan&&action.action!=='propose_plan'&&action.action!=='report_step_result'){evidencePlan.record({id:evidenceId,tool:action.action,status,...('path' in action?{path:action.path}:{}),command:commandEvidence,outputRef:stored.outputRef,timestamp:Date.now()});this.planState();}
+          const evidenceOutput=controlled?JSON.stringify({evidence_id:evidenceId,result:stored.preview}):stored.preview;
           messages.push({role:'user',content:JSON.stringify({toolResult:{status,output:evidenceOutput}}),...(turn?{toolResult:{id:turn.calls[index].id,name:turn.calls[index].name,status,output:evidenceOutput}}:{})});await this.checkpoint();
           if(action.action==='propose_plan'&&status==='success'){outcome='stopped';this.event('assistant','Plan ready for approval.');return;}
           if(action.action==='report_step_result'&&status==='success'){

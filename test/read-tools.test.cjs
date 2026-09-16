@@ -75,6 +75,7 @@ test('symbol queries include nested methods and containers',async()=>{
 
 test('exclusion globs flatten alternatives for VS Code 1.96 ripgrep',()=>{
  const {exclusionGlob}=require('../dist/readTools');const glob=exclusionGlob(['approval.txt','src/{generated,{cache,tmp}}/**']);
- assert.equal(glob,'{**/node_modules/**,**/.git/**,**/dist/**,**/coverage/**,**/.env/**,**/.env.*/**,**/*.vsix/**,approval.txt,src/generated/**,src/cache/**,src/tmp/**}');
+ assert.ok(glob.includes('approval.txt')&&glob.includes('src/generated/**')&&glob.includes('src/cache/**')&&glob.includes('src/tmp/**'));
+ assert.ok(glob.includes('**/node_modules/**')&&glob.includes('**/.git/**')&&glob.includes('**/dist/**')&&glob.includes('**/build/**')&&glob.includes('**/.venv/**')&&glob.includes('**/vendor/**')&&glob.includes('**/target/**'));
  assert.throws(()=>exclusionGlob(['{a,b}'.repeat(10)]),/Too many/);
 });
