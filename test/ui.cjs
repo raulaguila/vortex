@@ -116,17 +116,17 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   }
   // Explicit truncation and storage failures remain understandable at narrow widths.
   await post(chat,{type:'history',events:[{role:'user',text:'Inspect output'},{role:'activity',text:'',activity:{sessionId:sessions[0].id,id:'activity-fixture',runId:'run',name:'read_file',status:'success',output:'preview',outputRef:'11111111-1111-1111-1111-111111111111',truncated:true,startedAt:1,endedAt:2}}],busy:false,status:'Ready'});
-  await chat.locator('.activity-group > summary').click();await chat.locator('.activity > summary').click();await chat.getByRole('button',{name:'View full output'}).click();await chat.waitForTimeout(50);assert.deepEqual(openedActivity,{sessionId:sessions[0].id,activityId:'activity-fixture'});
+  await chat.locator('.activity-group > summary').click();await chat.locator('.activity-card-header').click();await chat.getByRole('button',{name:'View full output'}).click();await chat.waitForTimeout(50);assert.deepEqual(openedActivity,{sessionId:sessions[0].id,activityId:'activity-fixture'});
   await post(chat,{type:'persistenceState',failed:true});assert.equal(await chat.getByRole('alert').filter({hasText:'Progress could not be saved'}).isVisible(),true);
   for(const width of [280,360,480]){await chat.setViewportSize({width,height:800});assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await chat.screenshot({path:path.join(output,`recovery-${width}.png`)});}
   await post(chat,{type:'persistenceState',failed:false});assert.equal(await chat.getByRole('alert').filter({hasText:'Progress could not be saved'}).isVisible(),false);
   // Representative conversation and functional message actions.
   const longMessage='Please improve the account screen.\n'.repeat(24);
   await post(chat,{type:'history',events:[{role:'user',text:longMessage,timestamp:Date.now()},{role:'activity',text:'read_file · account.ts · success\nRead 80 lines.'},{role:'activity',text:'edit_file · account.ts · denied\nApproval denied.'},{role:'assistant',text:'## Account screen\nThe edit was **not applied** because approval was declined.\n\n- Existing files are unchanged.\n- You can review the proposed implementation.\n\n```ts\nconst enabled = true;\n```',timestamp:Date.now()}],busy:false,status:'Ready'});
-  await chat.locator('.expand-message').waitFor();assert.equal(await chat.locator('.activity-group').count(),1);assert.equal(await chat.locator('.activity-group .activity').count(),2);
+  await chat.locator('.expand-message').waitFor();assert.equal(await chat.locator('.activity-group').count(),1);assert.equal(await chat.locator('.activity-group .activity-card').count(),2);
   assert.equal(await chat.locator('.activity-group').getAttribute('open'),null);
   await chat.locator('.activity-group > summary').click();assert.equal(await chat.locator('.activity-label').first().innerText(),'Read file');assert.equal(await chat.locator('.activity-label').nth(1).innerText(),'Action declined');
-  assert.equal(await chat.locator('.activity-path').first().innerText(),'account.ts');await chat.locator('.activity > summary').first().click();assert.equal(await chat.locator('.activity-output pre').first().innerText(),'Read 80 lines.');
+  assert.equal(await chat.locator('.activity-path').first().innerText(),'account.ts');await chat.locator('.activity-card-header').first().click();assert.equal(await chat.locator('.activity-card-body pre').first().innerText(),'Read 80 lines.');
   await chat.setViewportSize({width:360,height:800});await chat.screenshot({path:path.join(output,'activity-details-360.png')});await chat.locator('.activity-group > summary').click();
 
   await chat.locator('.expand-message').click();assert.equal(await chat.locator('.message-collapsed').count(),0);await chat.locator('.expand-message').click();
@@ -272,7 +272,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
       await post(chat,{type:'status',busy:true,text:item.kind==='question'?'Waiting for your answer':'Waiting for approval'});
       await post(chat,{type:'interaction',interaction:item});await chat.locator('#interaction-card').waitFor();
       assert.ok(await chat.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-      const card=await chat.locator('#interaction-card').boundingBox(),footer=await chat.locator('footer').boundingBox();if(item.kind==='approval')assert.ok(card.y+card.height<=footer.y);else{const composer=await chat.locator('.composer').boundingBox();assert.ok(card.y>=composer.y&&card.y+card.height<=composer.y+composer.height);assert.equal(await chat.locator('#prompt').isVisible(),false);}
+      const card=await chat.locator('#interaction-card').boundingBox(),footer=await chat.locator('footer').boundingBox();if(item.kind==='approval')assert.ok(card.y+card.height<=footer.y);else{const timeline=await chat.locator('#timeline').boundingBox();assert.ok(card.y>=timeline.y&&card.y+card.height<=footer.y);assert.equal(await chat.locator('#prompt').isVisible(),true);}
       await chat.screenshot({path:path.join(output,`interaction-${item.kind}-${lang}-${theme}-${width}.png`)});
     }
   }
@@ -322,7 +322,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   assert.equal(await chat.locator('#plan-popover').isVisible(),false);
   const geometry=()=>chat.locator('#timeline,.composer').evaluateAll(rows=>rows.map(row=>{const r=row.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scroll:row.scrollTop};}));
   const beforeOverlay=await geometry();await chat.locator('#plan-toggle').click();assert.deepEqual(await geometry(),beforeOverlay);
-  const overlay=await chat.locator('#plan-popover').boundingBox();const composerBounds=await chat.locator('.composer').boundingBox();assert.ok(overlay.height<=360&&overlay.y+overlay.height<composerBounds.y);
+  const overlay=await chat.locator('#plan-popover').boundingBox();const composerBounds=await chat.locator('.composer').boundingBox();assert.ok(overlay.y+overlay.height<=composerBounds.y);
   await chat.locator('.plan-step').last().locator('summary').click();assert.equal(await chat.locator('.plan-step').last().getAttribute('open'),'');
   await chat.keyboard.press('Escape');assert.equal(await chat.locator('#plan-popover').isVisible(),false);assert.equal(await chat.locator('#plan-toggle').evaluate(el=>el===document.activeElement),true);
   await chat.locator('#plan-toggle').click();await chat.locator('#mode-trigger').click();assert.equal(await chat.locator('#plan-popover').isVisible(),false);await chat.keyboard.press('Escape');
@@ -331,7 +331,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
   const persistentQuestion={id:'persistent-question',runId:'r-draft',kind:'question',question:'Which validation should run?',options:['Focused tests','Full suite','Static analysis','Build only','Check the public API without changing existing consumers'],recommended_option:'Focused tests'};
   await post(chat,{type:'event',event:{role:'assistant',text:persistentQuestion.question,interactionId:persistentQuestion.id}});
   await chat.locator('#plan-toggle').click();await post(chat,{type:'interaction',interaction:persistentQuestion});assert.equal(await chat.locator('#plan-popover').isVisible(),false);
-  assert.equal(await chat.locator('#timeline [data-interaction-id]:visible').count(),0);assert.equal(await chat.locator('.interaction-recommended').count(),1);assert.equal(await chat.locator('[role=radio][aria-checked=true]').count(),0);
+  assert.equal(await chat.locator('#interaction-card').isVisible(),true);assert.equal(await chat.locator('.interaction-recommended').count(),1);assert.equal(await chat.locator('[role=radio][aria-checked=true]').count(),0);
   const submittedBefore=interactionReplies.length;await chat.locator('.interaction-option').first().focus();await chat.keyboard.press('ArrowDown');assert.equal(await chat.locator('.interaction-option').nth(1).getAttribute('aria-checked'),'true');assert.equal(interactionReplies.length,submittedBefore);
   await chat.locator('#interaction-answer').fill('Keep the API');assert.equal(await chat.locator('[role=radio][aria-checked=true]').count(),0);
   await chat.locator('#interaction-answer').press('Shift+Enter');await chat.locator('#interaction-answer').press('Enter');assert.equal(interactionReplies.length,submittedBefore);

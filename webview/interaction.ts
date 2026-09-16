@@ -7,24 +7,23 @@ const element=<K extends keyof HTMLElementTagNameMap>(tag:K,className='',text?:s
 };
 const text=(en:string,pt:string)=>window.VortexUI.language()==='pt'?pt:en;
 export function setupInteractions(send:(reply:InteractionReply)=>string, state:ViewState){
- const card=element('section','interaction-card');card.id='interaction-card';card.hidden=true;card.setAttribute('aria-labelledby','interaction-heading');
- document.querySelector('footer')!.before(card);
+ const card=element('article','interaction');card.id='interaction-card';card.hidden=true;card.setAttribute('aria-labelledby','interaction-heading');
+ const timeline=document.getElementById('timeline')!;
  const composer=document.querySelector<HTMLElement>('.composer')!;
  let current:Interaction|null=null,language='',pendingId='',answer='',selectedOption:string|null=null,chosen=new Set<number>();
  const saveAnswer=()=>state.patch({questionDraft:current?.kind==='question'?{id:current.id,answer,selectedOption}:null});
- const syncTranscript=()=>document.querySelectorAll<HTMLElement>('[data-interaction-id]').forEach(row=>{row.hidden=row.dataset.interactionId===document.body.dataset.questionId;});
  let updateControls=()=>{};
  function render(next:Interaction|null){
   const focused=card.contains(document.activeElement)?document.activeElement as HTMLElement:null;
   const focusId=focused?.id,focusOption=focused?.dataset.option;
   const selection=focused instanceof HTMLTextAreaElement?[focused.selectionStart,focused.selectionEnd]:null;
   const fresh=current?.id!==next?.id,hadFocus=card.contains(document.activeElement);current=next;
-  if(!next){card.hidden=true;card.replaceChildren();answer='';selectedOption=null;pendingId='';delete composer.dataset.question;delete document.body.dataset.questionId;saveAnswer();syncTranscript();document.querySelector('footer')!.before(card);if(hadFocus)document.getElementById('prompt')?.focus();return;}
+  if(!next){card.hidden=true;card.remove();answer='';selectedOption=null;pendingId='';saveAnswer();if(hadFocus)document.getElementById('prompt')?.focus();return;}
   if(fresh){const saved=state.read().questionDraft;answer=saved?.id===next.id&&typeof saved.answer==='string'?saved.answer:'';selectedOption=next.kind==='question'&&saved?.id===next.id&&next.options?.includes(saved.selectedOption)?saved.selectedOption:null;chosen=new Set(next.kind==='approval'?next.hunks?.map((_,i)=>i):[]);pendingId='';document.dispatchEvent(new CustomEvent('vortex:overlay-open',{detail:'interaction'}));}
-  if(next.kind==='question'){composer.dataset.question='true';document.body.dataset.questionId=next.id;composer.prepend(card);}else{delete composer.dataset.question;delete document.body.dataset.questionId;document.querySelector('footer')!.before(card);}syncTranscript();
   language=window.VortexUI.language();card.hidden=false;card.replaceChildren();card.dataset.kind=next.kind;card.dataset.id=next.id;
+  timeline.append(card);
   if(next.kind==='approval')card.dataset.operation=next.operation;else delete card.dataset.operation;
-  const heading=element('h2','',next.kind==='question'?text('Vortex needs your answer','Vortex precisa da sua resposta'):text('Approve this action?','Aprovar esta ação?'));
+  const heading=element('h2','interaction-heading',next.kind==='question'?text('Vortex needs your answer','Vortex precisa da sua resposta'):text('Approve this action?','Aprovar esta ação?'));
   heading.id='interaction-heading';heading.tabIndex=-1;card.append(heading);
   const form=element('form'),body=element('div','interaction-body'),actions=element('div','interaction-actions'),error=element('p','interaction-error');error.id='interaction-error';error.setAttribute('role','alert');error.hidden=true;
   const primary=element('button','interaction-primary'),reject=element('button','interaction-reject',next.kind==='question'?text('Cancel task','Cancelar tarefa'):text('Reject','Rejeitar'));
@@ -88,6 +87,4 @@ export function setupInteractions(send:(reply:InteractionReply)=>string, state:V
   if(m.type==='runEnd'&&current?.runId===m.requestId)render(null);
   if(m.type==='result'&&m.requestId===pendingId){pendingId='';updateControls();if(!m.ok){const error=card.querySelector<HTMLElement>('.interaction-error');if(error){error.textContent=m.message||text('Could not send. Try again.','Não foi possível enviar. Tente novamente.');error.hidden=false;}}}
  });
- // History may arrive after the pending question snapshot on a webview reload.
- new MutationObserver(syncTranscript).observe(document.getElementById('timeline')!,{childList:true});
 }

@@ -5,25 +5,18 @@ const reasons:Record<string,string>={"Human review required.": "Revisão humana 
 const icon=(name:string,cls='')=>{const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add(cls||'plan-icon');svg.setAttribute('aria-hidden','true');const use=document.createElementNS(svg.namespaceURI,'use');use.setAttribute('href','#i-'+name);svg.append(use);return svg;};
 const tr=(en:string,pt:string)=>window.VortexUI.language()==='pt'?pt:en;
 export function setupPlan(send:(type:string,data:Record<string,unknown>)=>string){
- const panel=node('section','plan-panel');panel.id='plan-panel';panel.hidden=true;panel.setAttribute('aria-label',tr('Implementation plan','Plano de implementação'));document.getElementById('checklist')!.before(panel);
+ const panel=node('article','plan');panel.id='plan-panel';panel.hidden=true;panel.setAttribute('aria-label',tr('Implementation plan','Plano de implementação'));
  let plan:PlanState|null=null,sessionId='',busy=false,readOnly=false,pending='',comment='',revising=false,legacy=false,errorText='',key='';
  const open=new Set<string>();
  let expanded=false,legacyItems:{id:string;text:string;status:string}[]=[];
  const toggle=node('button','plan-toggle');toggle.id='plan-toggle';toggle.type='button';toggle.setAttribute('aria-controls','plan-popover');
- const content=node('div','plan-popover');content.id='plan-popover';content.hidden=true;content.setAttribute('role','region');
- panel.append(toggle,content);
- function position(){
-  if(!expanded)return;
-  const top=panel.getBoundingClientRect().bottom;
-  const bottom=document.querySelector('.composer')!.getBoundingClientRect().top;
-  content.style.maxHeight=Math.max(0,Math.min(innerHeight*.45,bottom-top-8))+'px';
- }
+ const content=node('div','plan-body');content.id='plan-popover';content.hidden=true;content.setAttribute('role','region');
+ const header=node('div','plan-header');header.append(toggle);
+ panel.append(header,content);
  function collapse(focus=false){expanded=false;content.hidden=true;toggle.setAttribute('aria-expanded','false');panel.dataset.expanded='false';if(focus)toggle.focus({preventScroll:true});}
- toggle.onclick=()=>{if(expanded){collapse();return;}document.dispatchEvent(new CustomEvent('vortex:overlay-open',{detail:'plan'}));expanded=true;content.hidden=false;toggle.setAttribute('aria-expanded','true');panel.dataset.expanded='true';position();};
+ toggle.onclick=()=>{if(expanded){collapse();return;}document.dispatchEvent(new CustomEvent('vortex:overlay-open',{detail:'plan'}));expanded=true;content.hidden=false;toggle.setAttribute('aria-expanded','true');panel.dataset.expanded='true';};
  document.addEventListener('vortex:overlay-open',event=>{if((event as CustomEvent).detail!=='plan')collapse(panel.contains(document.activeElement));});
- document.addEventListener('pointerdown',event=>{if(expanded&&!panel.contains(event.target as Node))collapse();});
  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&expanded){event.preventDefault();event.stopPropagation();collapse(true);}});
- window.addEventListener('resize',position);new ResizeObserver(position).observe(document.querySelector('footer')!);
  function bar(){
   const complete=plan?.executions.filter(e=>e.status==='completed').length??legacyItems.filter(i=>i.status==='completed').length;
   const count=plan?.steps.length??legacyItems.length;
@@ -42,8 +35,9 @@ export function setupPlan(send:(type:string,data:Record<string,unknown>)=>string
  function render(){
   const scroll=content.scrollTop;
   const focused=panel.contains(document.activeElement)?document.activeElement as HTMLElement:null;const focusId=focused?.id;const selection=focused instanceof HTMLTextAreaElement?[focused.selectionStart,focused.selectionEnd]:null;
-  panel.hidden=!plan&&!legacy;content.replaceChildren();bar();if(panel.hidden){collapse();return;}
-  if(!plan){content.append(node('p','',tr('Legacy checklist — results were not verified by Vortex.','Checklist antigo — resultados não verificados pelo Vortex.')),button(tr('Generate executable plan','Gerar plano executável'),'plan-legacy',()=>request('structureLegacyPlan')));for(const item of legacyItems)content.append(node('p','plan-data',`${item.status==='completed'?'✓':'○'} ${item.text}`));position();return;}
+  panel.hidden=!plan&&!legacy;content.replaceChildren();bar();if(panel.hidden){collapse();panel.remove();return;}
+  const timeline=document.getElementById('timeline');if(timeline&&!panel.isConnected)timeline.append(panel);
+  if(!plan){content.append(node('p','',tr('Legacy checklist — results were not verified by Vortex.','Checklist antigo — resultados não verificados pelo Vortex.')),button(tr('Generate executable plan','Gerar plano executável'),'plan-legacy',()=>request('structureLegacyPlan')));for(const item of legacyItems)content.append(node('p','plan-data',`${item.status==='completed'?'✓':'○'} ${item.text}`));return;}
   const current=plan.executions.find(e=>e.id===plan!.active_step),attempt=current?.attempts.at(-1),step=plan.steps.find(s=>s.id===plan!.active_step);
   const header=node('div','plan-heading');header.append(node('strong','plan-data',plan.objective),node('span','',`${plan.executions.filter(e=>e.status==='completed').length}/${plan.steps.length} · v${plan.version}`));content.append(header);
   const statuses:Record<string,[string,string]>={pending:['Pending','Pendente'],running:['Running','Executando'],validating:['Validating','Validando'],completed:['Completed','Concluído'],waiting_user:['Waiting for you','Aguardando você'],blocked:['Blocked','Bloqueado'],failed:['Failed','Falhou'],interrupted:['Interrupted','Interrompido']};
@@ -80,7 +74,7 @@ export function setupPlan(send:(type:string,data:Record<string,unknown>)=>string
    if(revising)actions.append(button(tr('Request revised plan','Solicitar revisão do plano'),'plan-submit-revision',()=>{if(comment.trim())request('revisePlan',{instruction:comment});else input.focus();}));
   }
   const error=node('p','plan-error',errorText);error.setAttribute('role','alert');error.hidden=!errorText;content.append(error,actions);
-  position();content.scrollTop=scroll;
+  content.scrollTop=scroll;
   if(focusId){const next=document.getElementById(focusId);next?.focus({preventScroll:true});if(selection&&next instanceof HTMLTextAreaElement)next.setSelectionRange(selection[0],selection[1]);}
  }
  onHostMessage(m=>{

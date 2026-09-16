@@ -62,10 +62,11 @@
   </defs></svg>
   <header class="header">
     <div class="conversation-heading"><button id="close-chat" class="icon-button" aria-label="Close chat and return home" title="Close chat and return home" hidden><svg><use href="#i-back"/></svg></button><div id="chat-heading" class="brand"><img src="{{logo}}" alt=""><span>Vortex</span></div></div>
+    <div id="task-context" class="task-context" hidden aria-live="polite"></div>
     <nav aria-label="Ações da conversa"><button id="history-button" class="icon-button" aria-label="Search sessions" title="Search sessions"><svg aria-hidden="true"><use href="#i-search"/></svg></button><button id="new-task" class="icon-button" aria-label="Nova tarefa" title="Nova tarefa"><svg><use href="#i-new-chat"/></svg></button><button id="open-settings" class="icon-button" aria-label="Configurações" title="Configurações"><svg><use href="#i-settings"/></svg></button></nav>
   </header>
   <section id="chat-page" class="page chat-page" aria-label="Conversa">
-    <section id="checklist" hidden><div class="section-heading"><strong>Implementation plan</strong><span id="checklist-progress"></span></div><ol id="checklist-items"></ol></section><main id="timeline" aria-label="Mensagens"><div id="welcome" class="welcome"><section id="recent-sessions" aria-label="Recent sessions"><div id="session-list"></div></section><img src="{{logo}}" alt="Vortex" class="empty-symbol"></div></main>
+    <section id="checklist" hidden><div class="section-heading"><strong>Implementation plan</strong><span id="checklist-progress"></span></div><ol id="checklist-items"></ol></section><main id="timeline" aria-label="Mensagens"><div id="welcome" class="welcome"><section id="recent-sessions" aria-label="Recent sessions"><div id="session-list"></div></section><img src="{{logo}}" alt="Vortex" class="empty-symbol"><div class="welcome-suggestions" id="welcome-suggestions"></div></div></main>
     <div id="chat-notice" class="notice" role="status" aria-live="polite"></div>
     <footer>
       <button id="connect-welcome" class="text-button connect-provider" hidden>Conectar provedor</button>
@@ -74,12 +75,16 @@
         <label class="sr-only" for="prompt">Sua mensagem</label><textarea id="prompt" rows="1" placeholder="Ask about the project…" aria-describedby="draft-hint"></textarea>
         <div id="draft-hint" class="draft-hint" role="status" hidden></div>
         <div class="composer-toolbar">
+          <div class="composer-controls">
           <button id="attach-context" class="icon-button attach-context" title="Add context" aria-label="Add context"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
           <label class="sr-only" for="mode">Modo</label><select id="mode" class="quiet-select" hidden><option value="ask" selected>Perguntar</option><option value="plan">Planejar</option><option value="agent">Agente</option></select><button id="mode-trigger" class="choice-trigger" aria-haspopup="menu" aria-expanded="false"><svg aria-hidden="true"><use href="#i-ask"/></svg><span>Ask</span></button>
           <button id="model-trigger" class="model-trigger" aria-haspopup="dialog" aria-expanded="false" aria-controls="model-picker" title="Selecionar modelo"><span id="selected-model">Selecionar modelo</span><svg class="chevron"><use href="#i-chevron"/></svg></button>
           <div class="permissions"><label for="permission" class="sr-only">Política de aprovação</label><select id="permission" hidden class="quiet-select" title="Comandos de terminal sempre exigem aprovação"><option value="supervised">Supervisionado</option><option value="autonomous">Autônomo</option></select><button id="permission-trigger" class="choice-trigger" aria-haspopup="menu" aria-expanded="false"><svg aria-hidden="true"><use href="#i-hand"/></svg><span class="sr-only">Supervised</span><svg class="chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button><span id="read-only" hidden><svg aria-hidden="true"><use href="#i-eye"/></svg><span>Somente leitura</span></span></div>
+          </div>
+          <div class="composer-actions">
           <button id="send" class="send-button icon-button" title="Enviar mensagem (Enter)" aria-label="Enviar mensagem"><svg><use href="#i-arrow"/></svg></button>
           <button id="stop" class="send-button icon-button" title="Interromper execução" aria-label="Interromper execução" hidden><svg><use href="#i-stop"/></svg></button>
+          </div>
         </div>
       </div>
       <div class="composer-meta"><button id="context-status" title="Estimated input usage; context is managed automatically">Context</button><span id="run-status" role="status">Pronto</span></div>

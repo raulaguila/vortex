@@ -122,7 +122,7 @@ test('run is locked while credentials resolve and Stop prevents the first provid
  const h=harness([{action:'finish',text:'unexpected'}]);let unlock;
  h.agent.providers.client=()=>new Promise(resolve=>{unlock=resolve;});
  const first=h.run('Read a file');assert.equal(h.agent.busy,true);
- await assert.rejects(h.run('Another task'),/execução/);h.agent.stop();unlock({chat:async()=>{throw new Error('must not call');}});
+ await assert.rejects(h.run('Another task'),/already running/);h.agent.stop();unlock({chat:async()=>{throw new Error('must not call');}});
  await first;assert.equal(h.events.at(-1).status,'stopped');
 });
 

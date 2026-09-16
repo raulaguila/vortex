@@ -18,7 +18,7 @@ function t(text){const s=text.trim();const row=translations.get(s);if(row)return
 const originals=new WeakMap();
 function translate(root=document.body){
  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;
- while(node=walker.nextNode()){if(node.parentElement?.closest('script,style,.plan-data,.dialog-data,.interaction-data,#chat-heading[data-title],.message-body,.activity pre,.live-command pre,.session-title,.model-name,.model-option,.connection h3,#checklist-items'))continue;const cached=originals.get(node);let original=cached&&node.textContent===cached.last?cached.original:node.textContent;const value=t(original);originals.set(node,{original,last:value});if(node.textContent!==value)node.textContent=value;}
+ while(node=walker.nextNode()){if(node.parentElement?.closest('script,style,.plan-data,.dialog-data,.interaction-data,#chat-heading[data-title],.message-body,.activity pre,.activity-card-body pre,.live-command pre,.session-title,.model-name,.model-option,.connection h3,#checklist-items'))continue;const cached=originals.get(node);let original=cached&&node.textContent===cached.last?cached.original:node.textContent;const value=t(original);originals.set(node,{original,last:value});if(node.textContent!==value)node.textContent=value;}
  for(const el of root.querySelectorAll<HTMLElement>('[placeholder],[title],[aria-label]'))for(const attr of ['placeholder','title','aria-label']){const value=el.getAttribute(attr);if(value){const key='original'+attr.replace(/-/g,'');const original=el.dataset[key]||value;el.dataset[key]=original;const translated=t(original);if(value!==translated)el.setAttribute(attr,translated);}}
  document.documentElement.lang=language==='pt'?'pt-BR':'en';
 }
