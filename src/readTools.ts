@@ -23,7 +23,9 @@ export function exclusionGlob(patterns:string[]=[]){
 async function textFile(root:string,relative:string){
  const file=await safePath(root,relative);
  let doc:vscode.TextDocument|undefined;
- for(const candidate of vscode.workspace.textDocuments||[]){if(candidate.isClosed)continue;try{if(await safePath(root,path.relative(root,candidate.uri.fsPath))===file){doc=candidate;break;}}catch{/* Protected or unrelated buffer. */}}
+ // The target is already validated. Compare canonical paths so aliases such as
+ // /var -> /private/var do not hide an existing editor buffer from read_file.
+ for(const candidate of vscode.workspace.textDocuments||[]){if(candidate.isClosed||candidate.uri.scheme&&candidate.uri.scheme!=='file')continue;try{if(await realpath(candidate.uri.fsPath)===file){doc=candidate;break;}}catch{/* Unavailable or unrelated buffer. */}}
  if(doc){const text=doc.getText();if(text.length>1000000)throw new Error('File exceeds 1 MB.');return {text,dirty:doc.isDirty,source:'buffer'};}
  const stat=await vscode.workspace.fs.stat(vscode.Uri.file(file));if(stat.size>1000000)throw new Error('File exceeds 1 MB.');
  return {text:await readFile(file,'utf8'),dirty:false,source:'disk'};

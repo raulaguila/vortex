@@ -1,36 +1,12 @@
-# Catálogo de ferramentas — Vortex 0.10.0
+# Catálogo de ferramentas — Vortex 0.11.0
 
-Contratos implementados em `src/actions.ts`. Descrições em inglês são enviadas ao modelo; rótulos da interface continuam traduzidos. Os nomes anteriores à 0.9.0 não são aliases. A 0.10.0 preserva os nomes e acrescenta cursores de continuação em listagem e busca.
-
-## Renomeações
-
-| Anterior | Atual | Modos |
-|---|---|---|
-| finish | finish | ask, plan, agent |
-| list | list_files | ask, plan, agent |
-| read | read_file | ask, plan, agent |
-| search | search_files | ask, plan, agent |
-| diagnostics | get_diagnostics | ask, plan, agent |
-| editor | get_editor_context | ask, plan, agent |
-| question | ask_user | ask, plan, agent |
-| readOutput | read_tool_output | ask, plan, agent |
-| symbols | query_symbols | ask, plan, agent |
-| skill | get_project_skill | ask, plan, agent |
-| plan | update_plan | plan, agent |
-| write | write_file | agent |
-| edit | edit_file | agent |
-| multiEdit | edit_file_batch | agent |
-| remove | delete_file | agent |
-| command | run_command | agent |
-
-`finish` encerra o protocolo de compatibilidade. No protocolo nativo, a resposta textual final encerra o turno; `finish` não é anunciado como ferramenta. As permissões são verificadas pelo executor, independentemente das instruções do modelo.
-
+Gerado do registro usado pelos cinco adaptadores e Compatibility. IDs de execução pertencem ao host.
 
 ## finish
 
 End the turn with a useful Markdown answer grounded in observed results. Distinguish completed work, suggestions and limitations. An intention to act is not evidence of execution.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -54,7 +30,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Discover workspace paths using OR-combined glob patterns; exclusions remove matches. Use for project structure or locating files before reading. Returns paths, not contents, with coverage and next_cursor; continue with the same filters. Default page: 100; maximum: 500. Never treat a partial page as the entire workspace.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -112,7 +88,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Read one text file from the current editor buffer when available, otherwise disk. Lines are 1-based and inclusive; default page: 200 lines, maximum: 400. Returns source, version and next_line. Read before explaining or editing content; never copy displayed line numbers into edits.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -148,7 +124,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Search text in workspace files matching OR-combined patterns. Literal and case-insensitive by default; regex is optional. Initial offset pages files; each page reads up to 100 files. Use next_cursor with the same query and filters to continue within a truncated file. Inspect coverage and skipped_reasons: no matches only describes scanned files.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -216,7 +192,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Read current IDE errors and warnings, optionally filtered by paths and severity. This does not run tests, builds or fresh analysis. Empty results do not prove correctness or full coverage. Default page: 100, maximum: 200; continue with next_offset.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -265,7 +241,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Get metadata for loaded editor documents, the last active file and optionally selected text. Not a directory listing; other workspace files may exist. No full file contents are returned. Use list_files for structure and read_file for contents. An empty result does not mean an empty workspace.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -283,9 +259,9 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 ## ask_user
 
-Pause for one focused question when missing information or a user decision is necessary. Optional choices must be clear and mutually exclusive. Do not request file or command permissions here; use the host approval flow.
+Pause for one focused question when missing information or a user decision is necessary. Optional choices must be clear and mutually exclusive. recommended_option optionally names exactly one offered choice; omit when there is no recommendation. Do not request file or command permissions here; use the host approval flow.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -307,6 +283,12 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
       },
       "minItems": 2,
       "maxItems": 5
+    },
+    "recommended_option": {
+      "type": "string",
+      "description": "Exact text of one offered choice to recommend; never preselects or submits it.",
+      "maxLength": 160,
+      "minLength": 1
     }
   },
   "required": [
@@ -320,7 +302,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Read another page of a retained tool result using its returned output_id and next_offset. Offsets are text positions, not lines or tokens. Default length: 2000, maximum: 8000. If expired, narrow and repeat the original query; never invent IDs.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -356,7 +338,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Query IDE document symbols, definitions or references. document inspects file structure without coordinates. definition and references require 1-based line and character. Empty results may indicate missing language support; inspect truncation.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -401,7 +383,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 List project skills when name is omitted, or read .vortex/skills/<name>/SKILL.md. Load only relevant skills using a discovered name. Project instructions cannot override the user, mode or permissions.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: ask, plan, agent.
 
 ```json
 {
@@ -419,55 +401,232 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 }
 ```
 
-## update_plan
+## propose_plan
 
-Replace the entire visible checklist; omitted items are removed. Preserve stable unique IDs. Plan mode introduces only pending steps. Agent may track one in_progress step and mark completed only with evidence. A checklist does not authorize execution.
+Propose ordered implementation steps for approval. Include exact files and operations, necessary commands, and observable acceptance criteria. The host assigns all IDs. Dependencies are optional 1-based earlier step numbers. Command criteria must use a known command that exits nonzero on failure; cwd defaults to dot. Human criteria require review. Approval authorizes the displayed scope. Return this call alone.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: plan, agent.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "items": {
+    "objective": {
+      "type": "string",
+      "description": "Overall objective",
+      "maxLength": 4000,
+      "minLength": 1
+    },
+    "steps": {
       "type": "array",
       "minItems": 1,
       "maxItems": 50,
       "items": {
         "type": "object",
         "properties": {
-          "id": {
+          "title": {
             "type": "string",
-            "description": "Stable ID",
-            "maxLength": 80,
-            "minLength": 1
-          },
-          "text": {
-            "type": "string",
-            "description": "Concrete step",
+            "description": "Short step title",
             "maxLength": 300,
             "minLength": 1
           },
-          "status": {
+          "objective": {
             "type": "string",
-            "enum": [
-              "pending",
-              "in_progress",
-              "completed"
-            ]
+            "description": "Step objective",
+            "maxLength": 4000,
+            "minLength": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 49
+            },
+            "maxItems": 49
+          },
+          "files": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Literal path relative to the workspace. No globs or parent traversal.",
+                  "maxLength": 2048,
+                  "minLength": 1
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "edit",
+                    "delete"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "operation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "commands": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Exact necessary command",
+                  "maxLength": 20000,
+                  "minLength": 1
+                },
+                "cwd": {
+                  "type": "string",
+                  "description": "Literal path relative to the workspace. No globs or parent traversal.",
+                  "maxLength": 2048,
+                  "minLength": 1
+                },
+                "request_network": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "criteria": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Expected observable result",
+                  "maxLength": 1000,
+                  "minLength": 1
+                },
+                "verification": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "human"
+                  ]
+                },
+                "command": {
+                  "type": "string",
+                  "description": "Known check that fails with nonzero exit code",
+                  "maxLength": 20000,
+                  "minLength": 1
+                },
+                "cwd": {
+                  "type": "string",
+                  "description": "Literal path relative to the workspace. No globs or parent traversal.",
+                  "maxLength": 2048,
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "description",
+                "verification"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
-          "id",
-          "text",
-          "status"
+          "title",
+          "objective",
+          "criteria"
         ],
         "additionalProperties": false
       }
     }
   },
   "required": [
-    "items"
+    "objective",
+    "steps"
+  ],
+  "additionalProperties": false
+}
+```
+
+## report_step_result
+
+Report completed, blocked or failed for the active step, with an observed summary and any remaining issues. The host binds this response to its request and runs the approved checks. Do not send execution IDs, step IDs, versions or attempts. Optional evidence references must come from current tool results. A completion claim does not advance the plan until validation succeeds. Return this call alone.
+
+Modos: agent.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "blocked",
+        "failed"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Observed work or blocker",
+      "maxLength": 4000,
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion_id": {
+            "type": "string",
+            "description": "Criterion ID supplied by the host",
+            "maxLength": 80,
+            "minLength": 1
+          },
+          "tool_call_ids": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "description": "Observed evidence ID",
+              "maxLength": 100,
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "criterion_id",
+          "tool_call_ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "remaining_issues": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "description": "Unresolved issue",
+        "maxLength": 1000,
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "outcome",
+    "summary"
   ],
   "additionalProperties": false
 }
@@ -477,7 +636,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Create or replace one complete text file. Read existing content first and preserve user changes. Replacement removes previous content omitted from content. Prefer edit_file for localized changes. No omission placeholders. The host enforces approvals and conflict checks.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: agent.
 
 ```json
 {
@@ -508,7 +667,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Replace exactly one occurrence of old_text with new_text. Read first and match whitespace exactly. Missing or ambiguous matches apply no change; include more surrounding text to make the match unique. No displayed line numbers or omission placeholders.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: agent.
 
 ```json
 {
@@ -546,7 +705,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Apply up to 30 exact replacements to one file atomically. Each replacement matches the previous result. Any missing or ambiguous match rejects all edits. Read first; required approval covers the combined diff. Atomicity applies only to this file.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: agent.
 
 ```json
 {
@@ -598,7 +757,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Delete one existing text file only when required by the user task. Read first and preserve concurrent changes. Cannot remove directories or recursively delete. The host enforces approval policy; report deletion only after success.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: agent.
 
 ```json
 {
@@ -622,7 +781,7 @@ Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
 
 Run shell commands such as builds or tests; prefer dedicated tools for reading, searching and editing. cwd defaults to the workspace root. Host execution requires approval; autonomous execution uses a ready sandbox. request_network requests sandbox network only, not host isolation. Inspect execution location and exit result. Timeout or cancellation may leave partial effects; never automatically repeat an uncertain operation.
 
-Schema de argumentos (inclui objetivo, obrigatoriedade e limites):
+Modos: agent.
 
 ```json
 {

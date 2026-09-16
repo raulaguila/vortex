@@ -2,7 +2,7 @@ SHELL := /bin/sh
 DEPS_STAMP := node_modules/.vortex-dependencies
 .PHONY: help install build watch test test-ui test-tls test-host check package install-vsix icons
 help:
-	@echo "install build watch typecheck test test-ui test-tls test-host test-sandbox test-real benchmark test-installed check package install-vsix icons"
+	@echo "install build watch typecheck test test-ui test-tls test-host test-sandbox test-real test-stability benchmark test-installed check package install-vsix icons"
 icons:
 	npm run icons
 install:
@@ -45,3 +45,7 @@ benchmark: build
 .PHONY: test-installed
 test-installed: package
 	VORTEX_VSIX_PATH="$(CURDIR)/vortex-agent.vsix" node test/extension-host.cjs
+
+.PHONY: test-stability
+test-stability: package
+	node scripts/stability-matrix.cjs

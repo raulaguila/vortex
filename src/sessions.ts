@@ -1,3 +1,4 @@
+import {PlanState,validatePlanState} from './plan';
 import {durableWrite} from './durable';
 import {acquireSessionLock,sessionLockActive} from './sessionLock';
 import {mkdir,readFile,readdir,writeFile,rename,unlink,stat,rm} from 'node:fs/promises';
@@ -6,7 +7,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {AgentEvent,ChecklistItem,ModelRef,SessionSummary,isModelRef} from './protocol';
 import {Mode,Permission,migratePolicy} from './policy';
 import {Message} from './providers';
-export interface Session extends SessionSummary {revision?:number;summary?:{text:string;through:number};root?:string;version?:number;runState?:'running'|'paused'|'complete'|'error';pendingTool?:{name:string;path?:string}; events:AgentEvent[]; messages:Message[]; checklist:ChecklistItem[]; mode:Mode; permission:Permission; model:ModelRef }
+export interface Session extends SessionSummary {plan?:PlanState;planHistory?:PlanState[];revision?:number;summary?:{text:string;through:number};root?:string;version?:number;runState?:'running'|'paused'|'complete'|'error';pendingTool?:{name:string;path?:string}; events:AgentEvent[]; messages:Message[]; checklist:ChecklistItem[]; mode:Mode; permission:Permission; model:ModelRef }
 export class SessionStore {
   private index?:Map<string,{summary:SessionSummary;text:string}>;
   private queue:Promise<unknown>=Promise.resolve();
@@ -35,7 +36,7 @@ export class SessionStore {
     const work=this.queue.then(async()=>{
      await this.migration;const release=this.held.has(session.id)?undefined:await acquireSessionLock(file+'.lock');
      try{const revision=await this.currentRevision(session.id);if(revision!==(session.revision||0))throw new Error('Session changed in another window. Reload it before saving.');
-      const snapshot={...copy,version:5,revision:revision+1,updatedAt:Date.now()};await mkdir(this.directory,{recursive:true});
+      const snapshot={...copy,version:7,revision:revision+1,updatedAt:Date.now()};this.decode(JSON.stringify(snapshot),session.id);await mkdir(this.directory,{recursive:true});
       if(revision>0){const previous=await readFile(file,'utf8');this.decode(previous,session.id);await durableWrite(file+'.bak',previous);}await durableWrite(file,JSON.stringify(snapshot));
       session.revision=snapshot.revision;session.updatedAt=snapshot.updatedAt;this.index=undefined;
      }finally{await release?.();}
@@ -51,11 +52,13 @@ export class SessionStore {
     if(session.events.some((e:any)=>e.activity!==undefined&&((e.activity?.truncated!==undefined&&typeof e.activity.truncated!=='boolean')||(e.activity?.outputRef!==undefined&&!/^[a-f0-9-]{36}$/.test(e.activity.outputRef))||(e.activity?.sessionId!==undefined&&e.activity.sessionId!==id)||!e.activity||typeof e.activity.id!=='string'||typeof e.activity.runId!=='string'||typeof e.activity.name!=='string'||typeof e.activity.output!=='string'||!['success','error','denied','recovered','cancelled','uncertain'].includes(e.activity.status)||!Number.isFinite(e.activity.startedAt)||!Number.isFinite(e.activity.endedAt)||e.activity.path!==undefined&&typeof e.activity.path!=='string')))throw new Error('This session contains invalid activity data.');
     if(session.root!==undefined&&typeof session.root!=='string'||session.summary!==undefined&&(!session.summary||typeof session.summary.text!=='string'||!Number.isSafeInteger(session.summary.through)||session.summary.through<0||session.summary.through>session.messages.length))throw new Error('This session contains invalid continuation metadata.');
     if(session.revision!==undefined&&(!Number.isSafeInteger(session.revision)||session.revision<0))throw new Error('Invalid session revision.');
+    if(session.plan){validatePlanState(session.plan);const a=session.plan.authorization;if(a&&(a.session_id!==session.id||a.workspace!==(session.root||'')))throw new Error('Plan authorization belongs to another session or workspace.');}
+    if(session.planHistory!==undefined){if(!Array.isArray(session.planHistory))throw new Error('Invalid plan history.');session.planHistory.forEach(validatePlanState);}
     return session;
   }
   async load(id:string):Promise<Session>{
     await this.migration;await this.queue;const session=this.decode(await readFile(this.file(id),'utf8'),id);
-    if(session.runState==='running'&&!await this.isActive(id))session.runState='paused';
+    if(session.runState==='running'&&!await this.isActive(id)){session.runState='paused';if(session.plan?.status==='running'){session.plan.status='paused';const active=session.plan.executions.find(s=>s.id===session.plan?.active_step);if(active&&['running','validating','waiting_user'].includes(active.status)){active.status='interrupted';const attempt=active.attempts.at(-1);if(attempt){attempt.status='interrupted';delete attempt.wait_reason;}}}}
     return {...session,...migratePolicy(session.mode,session.permission)};
   }
   async list(query='',offset=0,limit=50):Promise<SessionSummary[]>{

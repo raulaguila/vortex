@@ -30,6 +30,30 @@ svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width:
 .heading-with-back { font-size: 12px; font-weight: 600; margin-left: -5px; }
 .icon-button { width: 28px; height: 28px; padding: 4px; display: inline-flex; justify-content: center; align-items: center; flex-shrink: 0; }
 .page { flex: 1; min-height: 0; }
+.interaction-card { flex: 0 1 auto; min-height: 0; max-height: 48vh; overflow: auto; margin: 4px 16px 6px; padding: 12px; border: 1px solid var(--vscode-contrastBorder,var(--line)); border-radius: 12px; background: var(--vscode-editorWidget-background,var(--input)); scrollbar-width: thin; }
+.interaction-card h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+.interaction-card h2:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
+.interaction-body { min-width: 0; }
+.interaction-card p { margin: 0 0 6px; line-height: 1.5; }
+.interaction-card .interaction-question { color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interaction-path { display: block; font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.interaction-detail,.interaction-hunk pre { margin: 6px 0; padding: 8px; overflow: auto; max-height: 140px; font-size: 11px; background: var(--bg); border-radius: 5px; tab-size: 2; }
+.interaction-options { display: grid; gap: 5px; margin: 8px 0; }
+.interaction-option { text-align: left; border-color: var(--line); padding: 7px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interaction-option[aria-pressed=true] { border-color: var(--focus); background: var(--vscode-list-activeSelectionBackground,var(--hover)); color: var(--vscode-list-activeSelectionForeground,var(--fg)); }
+.interaction-card textarea { display: block; width: 100%; min-height: 54px; max-height: 120px; resize: vertical; margin-top: 8px; padding: 8px; border: 1px solid var(--vscode-input-border,var(--line)); border-radius: 5px; color: var(--vscode-input-foreground,var(--fg)); background: var(--vscode-input-background,var(--bg)); }
+.interaction-card textarea:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+.interaction-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.interaction-actions button { min-height: 28px; }
+.interaction-preview { margin-right: auto; color: var(--link); }
+.interaction-primary { background: var(--vscode-button-background,#0078d4); color: var(--vscode-button-foreground,#fff); border-color: var(--vscode-contrastBorder,transparent); }
+.interaction-primary:hover { background: var(--vscode-button-hoverBackground,#006cbe); }
+.interaction-reject { border-color: var(--line); }
+.interaction-hunks { margin-top: 8px; }
+.interaction-hunks summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+.interaction-hunk { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 6px; margin-top: 8px; font-size: 11px; }
+.interaction-hunk pre { grid-column: 1/-1; }
+.interaction-card .interaction-error { color: var(--vscode-errorForeground,#f48771); margin-top: 8px; }
 .chat-page { display: flex; flex-direction: column; }
 #timeline { flex: 1; overflow: auto; padding: 0 16px 16px; min-height: 32px; scrollbar-width: thin; }
 .welcome { margin-top: clamp(28px, 12vh, 100px); }
@@ -249,8 +273,14 @@ body[data-vortex-chat] article.user {max-width:94%;}
 .task-actions[hidden] {display:none}
 .task-actions button {font-size:11px;padding:3px 5px;color:var(--vscode-descriptionForeground);background:transparent;border:0}
 .task-actions button:hover {background:var(--vscode-toolbar-hoverBackground)}
-.attached-context {display:flex;gap:4px;flex-wrap:wrap}
-.context-chip {font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.attached-context {display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;max-height:104px;overflow-y:auto;padding:2px}
+.context-chip {display:inline-flex;align-items:center;gap:4px;font-size:11px;max-width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;padding-left:6px}
+.context-chip-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.context-remove {flex-shrink:0;width:24px;height:24px;padding:0;font-size:16px}
+.context-more {font-size:11px;min-height:24px;padding:2px 6px}
+.draft-hint {font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4}
+.attach-context {width:28px;height:28px;flex-shrink:0;padding:5px}
+#context-status[data-pressure="high"] {color:var(--vscode-editorWarning-foreground,var(--fg));text-decoration:underline dotted;text-underline-offset:3px}
 .composer-meta > button:first-child {font-size:11px;padding:1px 3px}
 /* Live execution feedback remains visible while the user scrolls the conversation. */
 .run-progress { display:flex;align-items:center;gap:8px;margin:6px var(--vortex-gutter,16px) 10px;color:var(--vscode-descriptionForeground);font-size:12px;flex-shrink:0;min-width:0; }
@@ -264,15 +294,19 @@ to { transform:rotate(360deg); } }
 .progress-spinner { animation:none; } }
 
 /* Composer: one source for dimensions, including the narrow layout. */
-body[data-vortex-chat] { --composer-padding:12px; --control-gap:8px; }
+body[data-vortex-chat] { --composer-padding:12px; --control-gap:4px; }
 .composer { border:1px solid var(--vscode-input-border,var(--line));border-radius:18px;background:var(--input);padding:var(--composer-padding); }
 .composer:focus-within { border-color:var(--focus); }
-.composer textarea { width:100%;min-height:48px;max-height:min(220px,35vh);resize:none;background:none;color:var(--vscode-input-foreground,var(--fg));border:0;padding:0;line-height:1.5;display:block;font-size:var(--vortex-chat-font-size,var(--vscode-font-size,13px)); }
-.composer-toolbar { display:flex;align-items:center;gap:var(--control-gap);margin-top:8px;min-width:0; }
+.composer textarea { width:100%;min-height:30px;max-height:min(220px,35vh);resize:none;background:none;color:var(--vscode-input-foreground,var(--fg));border:0;padding:0;line-height:1.5;display:block;font-size:var(--vortex-chat-font-size,var(--vscode-font-size,13px)); }
+.composer-toolbar { display:grid;grid-template-columns:28px 32px minmax(0,1fr) 32px 32px;align-items:center;gap:var(--control-gap);margin-top:8px;min-width:0; }
 .choice-trigger,.model-trigger { display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:4px 6px;font-size:11px;min-width:0;text-align:left; }
 .choice-trigger { white-space:nowrap;flex-shrink:0; }
-.model-trigger { flex:0 1 auto;width:fit-content;max-width:100%;justify-self:start; }
-.composer-toolbar .permissions { margin-left:auto;padding:0;flex-shrink:0; }
+.model-trigger { width:fit-content;max-width:100%;justify-self:start; }
+.composer-toolbar .permissions { margin-left:0;padding:0;min-width:0; }
+.composer-toolbar .choice-trigger { width:32px;min-height:28px;padding:4px 1px;gap:2px;justify-content:center; }
+.composer-toolbar .choice-trigger svg:last-child { width:10px;height:10px; }
+.composer-toolbar .choice-trigger svg:first-child { width:16px;height:16px; }
+.composer-tooltip { position:fixed;z-index:30;max-width:min(280px,calc(100vw - 16px));padding:6px 9px;font-size:11px;line-height:1.5;border:1px solid var(--vscode-contrastBorder,var(--line));border-radius:5px;background:var(--vscode-editorHoverWidget-background,var(--input));color:var(--fg);pointer-events:none;box-shadow:0 3px 12px #0002; }
 .send-button { display:inline-flex;align-items:center;justify-content:center;padding:5px;width:32px;height:32px;flex-shrink:0;border-radius:50%;background:var(--fg);color:var(--bg); }
 .send-button:hover { background:var(--fg);opacity:.85; }
 #run-status { display:none; }
@@ -282,12 +316,91 @@ body[data-vortex-chat] { --composer-padding:12px; --control-gap:8px; }
 .jump-latest { align-self:center;border:1px solid var(--line);background:var(--bg);border-radius:14px;padding:5px 12px;font-size:11px;margin-bottom:4px; }
 .recovery-actions { display:flex;gap:8px;flex-wrap:wrap;margin:4px var(--vortex-gutter) 10px; }
 .recovery-actions button { font-size:11px;border:1px solid var(--line); }
-@media(max-width:430px){
- .composer-toolbar { display:grid;grid-template-columns:auto minmax(0,1fr) 32px;gap:8px; }
- #mode-trigger { grid-column:1;grid-row:1; }
- .model-trigger { grid-column:2 / 4;grid-row:1; }
- .composer-toolbar .permissions { grid-column:1 / 3;grid-row:2;margin-left:0; }
- .send-button { grid-column:3;grid-row:2; }
-}
+.compact-controls .composer-toolbar { grid-template-columns:28px 32px minmax(0,1fr) 32px;gap:4px; }
+.compact-controls #attach-context { grid-column:1;grid-row:1; }
+.compact-controls #mode-trigger { grid-column:2;grid-row:1; }
+.compact-controls .model-trigger { grid-column:3 / 5;grid-row:1; }
+.compact-controls .composer-toolbar .permissions { grid-column:1;grid-row:2;margin-left:0; }
+.compact-controls .send-button { grid-column:4;grid-row:2; }
+
 
 .live-command{margin:4px 16px;font-size:12px;color:var(--vscode-descriptionForeground)}.live-command pre{max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--vscode-editor-font-family)}
+
+/* Shared, webview-local dialogs. Data never uses HTML interpolation. */
+.vortex-dialog { width: calc(100% - 24px); max-width: 480px; max-height: calc(100vh - 32px); margin: auto; padding: 16px; color: var(--fg); background: var(--vscode-editorWidget-background,var(--bg)); border: 1px solid var(--vscode-contrastBorder,var(--line)); border-radius: 12px; box-shadow: 0 8px 32px #0004; overflow: auto; }
+body[data-vortex-chat] > .vortex-dialog { margin-bottom: 16px; }
+.vortex-dialog::backdrop { background: #0005; }
+.vortex-dialog h2 { font-size: 13px; font-weight: 600; margin: 0 0 12px; overflow-wrap: anywhere; }
+.vortex-dialog h2:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
+.vortex-dialog-detail { color: var(--muted); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 12px; }
+.vortex-dialog input { width: 100%; min-width: 0; background: var(--input); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.vortex-dialog-list { max-height: 48vh; overflow: auto; margin-top: 8px; }
+.vortex-dialog .vortex-dialog-choice { display: block; width: 100%; padding: 9px; text-align: left; overflow-wrap: anywhere; }
+.vortex-dialog-choice small { display: block; color: var(--muted); margin-top: 4px; font-size: 11px; }
+.vortex-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.vortex-dialog-actions button { padding: 7px 10px; }
+.vortex-dialog .vortex-dialog-primary { background: var(--vscode-button-background,#0078d4); color: var(--vscode-button-foreground,#fff); }
+.vortex-dialog-error { color: var(--vscode-errorForeground,#f48771); overflow-wrap: anywhere; }
+.vortex-dialog progress { width: 100%; accent-color: var(--focus); }
+
+/* Compact plan bar: the panel is out of flow and never moves the transcript. */
+.plan-panel { position:relative;margin:0 var(--vortex-gutter,16px) 6px;flex:0 0 auto;z-index:12;min-width:0;font-size:12px; }
+.plan-panel[hidden] { display:none; }
+.plan-toggle { display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:5px 8px;text-align:left;border:1px solid var(--vscode-contrastBorder,var(--line));border-radius:7px;font-size:12px; }
+.plan-toggle-icon { width:16px;height:16px; }
+.plan-count,.plan-badge { color:var(--muted);font-size:11px; }
+.plan-badge { margin-left:auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
+.plan-chevron { margin-left:auto;width:12px;height:12px;flex-shrink:0; }
+.plan-badge + .plan-chevron { margin-left:0; }
+.plan-panel[data-expanded=true] .plan-chevron { transform:rotate(180deg); }
+.plan-popover { position:absolute;top:calc(100% + 3px);left:0;right:0;overflow:auto;padding:10px;background:var(--vscode-editorWidget-background,var(--bg));border:1px solid var(--vscode-contrastBorder,var(--line));border-radius:8px;box-shadow:0 5px 18px #0003;scrollbar-width:thin; }
+.plan-heading { display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin:0 2px 8px; }
+.plan-heading strong { font-size:12px;font-weight:500;overflow-wrap:anywhere; }
+.plan-heading > span { color:var(--muted);font-size:10px;white-space:nowrap; }
+.plan-current,.plan-policy { color:var(--muted);font-size:11px;margin:6px 2px;overflow-wrap:anywhere; }
+.plan-current { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%); }
+.plan-step { border:0;margin:0; }
+.plan-step > summary { display:flex;align-items:center;gap:8px;min-height:32px;padding:6px;border-radius:5px;cursor:pointer;list-style:none; }
+.plan-step > summary::-webkit-details-marker { display:none; }
+.plan-step > summary:hover { background:var(--hover); }
+.plan-step > summary .plan-data { flex:1;min-width:0;overflow-wrap:anywhere; }
+.plan-step > summary small { color:var(--muted);font-size:10px;max-width:35%; }
+.plan-state-icon { display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex-shrink:0; }
+.plan-step[data-status=running] > summary,.plan-step[data-status=validating] > summary { background:var(--vscode-list-hoverBackground,var(--hover)); }
+.plan-step[data-status=running] .plan-state-icon,.plan-step[data-status=validating] .plan-state-icon { color:var(--link); }
+.plan-step[data-status=completed] > summary { color:var(--muted); }
+.plan-step[data-status=failed] > summary,.plan-step[data-status=blocked] > summary { color:var(--vscode-errorForeground,#f48771); }
+.plan-step[open] { margin-bottom:8px; }
+.plan-step small { color:var(--muted); }
+.plan-step p { margin:6px;overflow-wrap:anywhere; }
+.plan-step ul { padding-left:22px; }
+.plan-step li { margin-bottom:8px;overflow-wrap:anywhere; }
+.plan-step li small,.plan-step code { display:block;overflow-wrap:anywhere; }
+.plan-popover textarea { width:100%;resize:vertical;min-height:52px;max-height:160px;margin-top:6px;padding:8px;color:var(--fg);background:var(--input);border:1px solid var(--line);border-radius:6px; }
+.plan-actions { display:flex;flex-wrap:wrap;gap:6px;margin-top:8px; }
+.plan-actions button { font-size:11px;border-color:var(--line); }
+#plan-approve,#plan-confirm { background:var(--vscode-button-background,#0078d4);color:var(--vscode-button-foreground,#fff); }
+.plan-evidence { margin-top:6px; }
+.plan-evidence pre { max-height:140px;overflow:auto;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere; }
+.plan-error { color:var(--vscode-errorForeground,#f48771); }
+
+/* Questions temporarily occupy the composer; the ordinary draft remains intact. */
+.composer[data-question] > :not(.interaction-card) { display:none !important; }
+.composer > .interaction-card { margin:0;padding:0;border:0;border-radius:0;background:none;max-height:min(60vh,520px);overflow:auto; }
+.composer > .interaction-card h2 { font-size:11px;font-weight:400;color:var(--muted);margin-bottom:10px; }
+.composer .interaction-question { font-size:var(--vortex-chat-font-size,13px);font-weight:500;color:var(--fg);line-height:1.5;margin-bottom:8px; }
+.composer .interaction-options { gap:1px;margin:6px 0; }
+.composer .interaction-option { display:flex;align-items:center;gap:9px;padding:8px 6px;border:1px solid transparent;border-radius:5px;min-height:36px;font-size:12px; }
+.composer .interaction-option-label { flex:1;min-width:0; }
+.composer .interaction-radio { width:14px;height:14px;border:1px solid var(--muted);border-radius:50%;flex-shrink:0; }
+.composer .interaction-option[aria-checked=true] { background:var(--vscode-list-inactiveSelectionBackground,var(--hover));border-color:var(--vscode-contrastBorder,transparent); }
+.composer .interaction-option[aria-checked=true] .interaction-radio { border-color:var(--focus);box-shadow:inset 0 0 0 3px var(--input);background:var(--focus); }
+.interaction-recommended { color:var(--muted);font-size:10px;font-weight:400; }
+.interaction-divider { display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px;margin:12px 2px 8px; }
+.interaction-divider::before,.interaction-divider::after { content:'';height:1px;background:var(--line);flex:1; }
+.composer .interaction-card textarea { background:none;border:0;border-radius:3px;padding:6px 2px;min-height:52px;max-height:160px;margin:0;font-size:var(--vortex-chat-font-size,13px); }
+.composer .interaction-card textarea:focus-visible { outline:1px solid var(--focus);outline-offset:1px; }
+.composer .interaction-actions { margin-top:8px;padding:2px; }
+.composer .interaction-reject { margin-right:auto;border:0;color:var(--muted);font-size:11px; }
+.composer .interaction-primary { font-size:12px;padding:5px 10px; }
+@media(max-width:320px) { .interaction-recommended { max-width:82px;overflow-wrap:anywhere; } }

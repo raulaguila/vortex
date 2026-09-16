@@ -1,3 +1,6 @@
+import {Dialogs} from './dialogs';
+import * as path from 'node:path';
+import {homedir} from 'node:os';
 import {invalidateFileQueries} from './readTools';
 import {probeModel} from './modelProbe';
 import * as vscode from 'vscode';
@@ -18,7 +21,7 @@ import {ReviewService} from './review';
 import {SessionStore} from './sessions';
 import {renderSidebar} from './view';
 
-type Surface = {webview: vscode.Webview; kind: 'chat' | 'settings'; disposed: boolean};
+type Surface = {webview: vscode.Webview; kind: 'chat' | 'settings'; disposed: boolean; ready:boolean; dialogs:Dialogs};
 export function activate(context: vscode.ExtensionContext) {
   const controller = new VortexController(context);
   context.subscriptions.push(controller, vscode.window.registerWebviewViewProvider('vortex.sidebar', controller),
@@ -32,7 +35,8 @@ class VortexController implements vscode.WebviewViewProvider {
   private providers: ProviderManager;
   private agent: AgentController;
   private sessions: SessionStore;
-  private attachments=new Attachments();
+  private attachments=new Attachments(()=>this.getDialogs());
+  private readyWaiters=new Set<()=>void>();
   private snapshotVersion = 0;
   private initialized = false;
   private restored?:Promise<void>;
@@ -43,21 +47,16 @@ class VortexController implements vscode.WebviewViewProvider {
     const queryWatcher=vscode.workspace.createFileSystemWatcher('**/*');ctx.subscriptions.push(queryWatcher,queryWatcher.onDidChange(invalidateFileQueries),queryWatcher.onDidCreate(invalidateFileQueries),queryWatcher.onDidDelete(invalidateFileQueries),vscode.workspace.onDidChangeTextDocument(invalidateFileQueries));
     this.sessions=new SessionStore(vscode.Uri.joinPath(ctx.globalStorageUri,'sessions').fsPath,ctx.storageUri?vscode.Uri.joinPath(ctx.storageUri,'sessions').fsPath:undefined,vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,ctx.globalStorageUri.fsPath,vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json').fsPath);
     const traceUri=vscode.Uri.joinPath(ctx.storageUri||ctx.globalStorageUri,'last-flow.json');
-    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.openLastFlow',async()=>{try{await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(traceUri));}catch{void vscode.window.showInformationMessage('No saved flow yet. Send a message to Vortex first.');}}));
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.openLastFlow',()=>this.command(()=>this.openTrace())));
     const output=vscode.window.createOutputChannel('Vortex');ctx.subscriptions.push(output);
     const diagnostics:string[]=[];const log=(record:Record<string,unknown>)=>{const line=JSON.stringify({time:new Date().toISOString(),...record});diagnostics.push(line);if(diagnostics.length>1000)diagnostics.shift();output.appendLine(line);};
     ctx.subscriptions.push(vscode.commands.registerCommand('vortex.diagnostics',()=>output.show()),vscode.commands.registerCommand('vortex.exportDiagnostics',async()=>{const doc=await vscode.workspace.openTextDocument({language:'jsonl',content:diagnostics.join('\n')});await vscode.window.showTextDocument(doc);}));
     void Sandbox.recover(vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath).catch(()=>log({event:'sandboxRecovery',status:'failed'}));
-    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.setupSandbox',async()=>{
-      const available=await new Sandbox().available();if(!available){void vscode.window.showInformationMessage('Install and start a local Docker runtime first. Host commands remain supervised.');return;}
-      const image=await vscode.window.showInputBox({title:'Download sandbox image',value:vscode.workspace.getConfiguration('vortex').get<string>('sandbox.image')||'node:22-bookworm-slim',validateInput:value=>/^[a-zA-Z0-9][a-zA-Z0-9./_:@-]{0,250}$/.test(value)?undefined:'Invalid image reference'});if(!image)return;
-      await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Vortex — Downloading sandbox image'},()=>new Promise<void>((resolve,reject)=>execFile('docker',['pull',image],{timeout:300000,maxBuffer:1024*1024},error=>error?reject(new Error('Image download failed. Check Docker and network access.')):resolve())));
-      await vscode.workspace.getConfiguration('vortex').update('sandbox.image',image,vscode.ConfigurationTarget.Global);
-    }));
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.setupSandbox',()=>this.command(()=>this.setupSandbox())));
     const outputDocuments=new Map<string,string>();ctx.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('vortex-output',{provideTextDocumentContent:uri=>outputDocuments.get(uri.toString())||''}),vscode.workspace.onDidCloseTextDocument(doc=>{if(doc.uri.scheme==='vortex-output')outputDocuments.delete(doc.uri.toString());}));this.outputDocuments=outputDocuments;
-    const reviews=new ReviewService(new ChangeStore(vscode.Uri.joinPath(ctx.globalStorageUri,'changes').fsPath));ctx.subscriptions.push(reviews);
-    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.agent.reviewChanges()),vscode.commands.registerCommand('vortex.undoChanges',()=>this.agent.undoChanges()));
-    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',async(uri?:vscode.Uri)=>{await this.attachments.choose(uri);this.attachmentState();}));
+    const reviews=new ReviewService(new ChangeStore(vscode.Uri.joinPath(ctx.globalStorageUri,'changes').fsPath),()=>this.getDialogs());ctx.subscriptions.push(reviews);
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.reviewChanges',()=>this.command(()=>this.agent.reviewChanges())),vscode.commands.registerCommand('vortex.undoChanges',()=>this.command(()=>this.agent.undoChanges())));
+    ctx.subscriptions.push(vscode.commands.registerCommand('vortex.attachContext',(uri?:vscode.Uri)=>this.command(async()=>{await this.attachments.choose(uri);this.attachmentState();})));
     const editor=new EditorContext();ctx.subscriptions.push(editor);
     this.providers = new ProviderManager(new ProfileStore(ctx.globalState), ctx.secrets,undefined,log);
     this.agent = new AgentController(this.providers, message => {
@@ -69,13 +68,48 @@ class VortexController implements vscode.WebviewViewProvider {
       if(message.type === 'accepted' || message.type === 'runEnd') {
         const target = this.routes.get(message.requestId); if(target) this.post(target, message);
       } else for(const target of this.surfaces) if(target.kind === 'chat' || message.type === 'status') this.post(target, message);
-    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor,traceUri.fsPath);
+    }, this.sessions,reviews,vscode.Uri.joinPath(ctx.globalStorageUri,'artifacts').fsPath,editor,traceUri.fsPath,()=>this.getDialogs());
+  }
+  private async getDialogs():Promise<Dialogs>{
+    await vscode.commands.executeCommand('vortex.sidebar.focus');
+    const find=()=>[...this.surfaces].find(s=>s.kind==='chat'&&s.ready&&!s.disposed)?.dialogs;
+    const current=find();if(current)return current;
+    return new Promise((resolve,reject)=>{
+      const done=()=>{const ui=find();if(ui){clearTimeout(timer);this.readyWaiters.delete(done);resolve(ui);}};
+      const timer=setTimeout(()=>{this.readyWaiters.delete(done);reject(new Error('Open the Vortex sidebar and try again.'));},10000);
+      this.readyWaiters.add(done);done();
+    });
+  }
+  private async command(action:()=>Promise<unknown>){
+    try{await action();}catch(error){await (await this.getDialogs()).notice('Could not complete the operation.',error instanceof Error?error.message:String(error));}
+  }
+  private async openTrace(ui?:Dialogs){try{await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(this.traceUri()));}catch{await (ui||await this.getDialogs()).notice('No saved flow yet. Send a message to Vortex first.');}}
+  private async setupSandbox(ui?:Dialogs){
+    ui ||= await this.getDialogs();
+    if(!await new Sandbox().available()){await ui.notice('Install and start a local Docker runtime first. Host commands remain supervised.');return;}
+    const image=await ui.input('Download sandbox image',vscode.workspace.getConfiguration('vortex').get<string>('sandbox.image')||'node:22-bookworm-slim','Choose the Docker image to download for isolated commands.',value=>/^[a-zA-Z0-9][a-zA-Z0-9./_:@-]{0,250}$/.test(value)?undefined:'Invalid image reference');if(!image)return;
+    const downloaded=await ui.progress('Downloading sandbox image…',signal=>new Promise<void>((resolve,reject)=>execFile('docker',['pull',image],{signal,timeout:300000,maxBuffer:1024*1024},error=>error?reject(new Error('Image download failed. Check Docker and network access.')):resolve())));
+    if(downloaded){await vscode.workspace.getConfiguration('vortex').update('sandbox.image',image,vscode.ConfigurationTarget.Global);await ui.notice('Sandbox image ready.',image);}
+  }
+  private async exportTrace(ui:Dialogs){
+    const file=await ui.input('Export AI flow',path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath||homedir(),'vortex-flow.json'),'Enter the full path of the JSON file to save.',value=>path.isAbsolute(value)&&value.endsWith('.json')&&!value.includes('\0')?undefined:'Use an absolute path ending in .json.');
+    if(!file)return;
+    if(path.resolve(file)===path.resolve(this.traceUri().fsPath))throw new Error('Choose a different file from the active trace.');
+    const existing=await stat(file).catch((error)=>{if(error.code!=='ENOENT')throw error;return undefined;});
+    if(existing&&!existing.isFile())throw new Error('Choose a file path, not a directory.');
+    if(existing&&!await ui.confirm('Replace existing file?',file,'Replace'))return;
+    await RunTrace.settled(this.traceUri().fsPath);const snapshot=await readFile(this.traceUri().fsPath);
+    // Exclusive creation prevents a concurrent file from being overwritten without consent.
+    const {open}=await import('node:fs/promises');const {constants}=await import('node:fs');
+    const handle=await open(file,constants.O_WRONLY|constants.O_NOFOLLOW|(existing?0:constants.O_CREAT|constants.O_EXCL),0o600);
+    try{const current=await handle.stat();if(existing&&(current.ino!==existing.ino||current.dev!==existing.dev||current.mtimeMs!==existing.mtimeMs||current.size!==existing.size))throw new Error('The destination changed. Export again.');await handle.writeFile(snapshot);await handle.truncate(snapshot.length);}finally{await handle.close();}
+    await ui.notice('Flow exported.',file);
   }
   private outputDocuments=new Map<string,string>();
   private traceUri(){return vscode.Uri.joinPath(this.ctx.storageUri||this.ctx.globalStorageUri,'last-flow.json');}
   private async traceInfo(target:Surface){const uri=this.traceUri();const info=await stat(uri.fsPath).catch(()=>undefined);this.post(target,{type:'traceInfo',path:uri.fsPath,exists:!!info,bytes:info?.size||0});}
   private attachmentState(){for(const surface of this.surfaces)if(surface.kind==='chat')this.post(surface,{type:'attachments',items:this.attachments.list()});}
-  dispose() { this.chatTest?.abort();this.agent.dispose(); this.panel?.dispose(); }
+  dispose() { for(const s of this.surfaces)s.dialogs.dispose();this.chatTest?.abort();this.agent.dispose(); this.panel?.dispose(); }
   private post(target: Surface, data: Response) { if(!target.disposed) void target.webview.postMessage(data); }
   private async state() {
     const version = ++this.snapshotVersion;
@@ -98,7 +132,7 @@ class VortexController implements vscode.WebviewViewProvider {
     panel.onDidDispose(() => { if(this.panel === panel) {this.chatTest?.abort();this.panel=undefined; this.panelSurface=undefined;} });
   }
   private bind(webview: vscode.Webview, kind: Surface['kind'], onDispose: (listener: () => void) => vscode.Disposable): Surface {
-    const target: Surface = {webview, kind, disposed:false}; this.surfaces.add(target);
+    const target: Surface = {webview, kind, disposed:false,ready:false,dialogs:new Dialogs(data=>this.post(target,data))}; this.surfaces.add(target);
     const media = vscode.Uri.joinPath(this.ctx.extensionUri, 'media');
     webview.options = {enableScripts:true,localResourceRoots:[media]};
     const asset = (name: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, name)).toString();
@@ -112,16 +146,22 @@ class VortexController implements vscode.WebviewViewProvider {
       try { await this.handle(target,msg); }
       catch(error) { this.post(target,{type:'result',requestId:msg.requestId,ok:false,message:error instanceof Error ? error.message : 'Não foi possível concluir a operação.'}); }
     });
-    onDispose(() => { if(target.kind==='settings')this.chatTest?.abort();target.disposed=true; listener.dispose(); this.surfaces.delete(target); });
+    onDispose(() => { if(target.kind==='settings')this.chatTest?.abort();target.dialogs.dispose();target.disposed=true; listener.dispose(); this.surfaces.delete(target); });
     return target;
   }
   private async handle(target: Surface, msg: Request): Promise<void> {
     const success = (message?: string, providerId?: string) => this.post(target,{type:'result',requestId:msg.requestId,ok:true,message,providerId});
     switch(msg.type) {
-      case 'setupSandbox':await vscode.commands.executeCommand('vortex.setupSandbox');success();return;
+      case 'structureLegacyPlan':if(target.kind!=='chat')throw new Error('Use the conversation.');this.routes.set(msg.requestId,target);try{await this.agent.structureLegacyPlan(msg.requestId,msg.sessionId);}finally{this.routes.delete(msg.requestId);}success();return;
+      case 'approvePlan':case 'reviewStep':case 'resumePlan':case 'revisePlan':
+        if(target.kind!=='chat')throw new Error('Use the conversation.');this.routes.set(msg.requestId,target);try{await this.agent.planAction(msg);}finally{this.routes.delete(msg.requestId);}success();return;
+      case 'respondDialog':target.dialogs.respond(msg);success();return;
+      case 'respondInteraction':if(target.kind!=='chat')throw new Error('Respond in the conversation.');await this.agent.respondInteraction(msg);success();return;
+      case 'setupSandbox':await this.setupSandbox(target.dialogs);success();return;
       case 'attachContext':await this.attachments.choose();this.attachmentState();success();return;
       case 'removeContext':this.attachments.remove(msg.id);this.attachmentState();success();return;
       case 'ready':
+        target.ready=true;for(const notify of this.readyWaiters)notify();target.dialogs.snapshot();
         this.attachmentState();
         await this.providers.migrateSelection(msg.legacySelection);await this.providers.initialize();await this.sessions.recoverDeletions();await this.sessions.cleanup(this.providers.preferences().storage?.retentionDays||0); await this.state();
         if(!this.restored)this.restored=(async()=>{
@@ -138,7 +178,7 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'openLink': await vscode.env.openExternal(vscode.Uri.parse(msg.url));return;
       case 'listSessions': {const rows=await this.sessions.list(msg.query,msg.offset||0,51);this.post(target,{type:'sessions',sessions:rows.slice(0,50),requestId:msg.requestId,offset:msg.offset||0,hasMore:rows.length>50});return;}
       case 'loadSession': await this.agent.load(msg.id); return;
-      case 'deleteSession': if(await vscode.window.showWarningMessage('Delete this session and its saved results?',{modal:true,detail:'This removes the conversation, retained outputs and undo history. Workspace files are preserved.'},'Delete')==='Delete')await this.agent.removeSession(msg.id);success();return;
+      case 'deleteSession': if(await target.dialogs.confirm('Delete this session and its saved results?','This removes the conversation, retained outputs and undo history. Workspace files are preserved.','Delete'))await this.agent.removeSession(msg.id);success();return;
       case 'refreshAllModels': await Promise.all(this.providers.providers().map(p=>this.providers.refresh(p.id,msg.requestId+':'+p.id,()=>this.state())));success();return;
       case 'modelInfo': await this.providers.inspect(msg.model);await this.state();success();return;
       case 'resume':case 'implementPlan':
@@ -151,16 +191,16 @@ class VortexController implements vscode.WebviewViewProvider {
       case 'traceInfo':await this.traceInfo(target);return;
       case 'openActivityOutput':{const content=await this.agent.activityOutput(msg.sessionId,msg.activityId);const uri=vscode.Uri.from({scheme:'vortex-output',path:'/'+msg.sessionId+'/'+msg.activityId+'.txt'});this.outputDocuments.set(uri.toString(),content);await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri),{preview:true});success();return;}
       case 'recoveryInfo':this.post(target,{type:'recoveryInfo',items:await this.sessions.recoverable()});return;
-      case 'recoverSession':if(this.agent.busy)throw new Error('Stop the task first.');if(await vscode.window.showWarningMessage(msg.kind==='backup'?'Restore the last valid session snapshot? The damaged file will be preserved.':'Remove an empty abandoned session lock? Close other Vortex windows first.',{modal:true},'Recover')==='Recover')await this.sessions.recover(msg.id,msg.kind);this.post(target,{type:'recoveryInfo',items:await this.sessions.recoverable()});success();return;
-      case 'openTrace':await vscode.commands.executeCommand('vortex.openLastFlow');success();return;
+      case 'recoverSession':if(this.agent.busy)throw new Error('Stop the task first.');if(await target.dialogs.confirm('Recover session',msg.kind==='backup'?'Restore the last valid session snapshot? The damaged file will be preserved.':'Remove an empty abandoned session lock? Close other Vortex windows first.','Recover'))await this.sessions.recover(msg.id,msg.kind);this.post(target,{type:'recoveryInfo',items:await this.sessions.recoverable()});success();return;
+      case 'openTrace':await this.openTrace(target.dialogs);success();return;
       case 'exportTrace':{
-        const uri=await vscode.window.showSaveDialog({defaultUri:vscode.Uri.file('vortex-flow.json'),filters:{JSON:['json']}});if(uri){await RunTrace.settled(this.traceUri().fsPath);const snapshot=await readFile(this.traceUri().fsPath);await vscode.workspace.fs.writeFile(uri,snapshot);}success();return;
+        await this.exportTrace(target.dialogs);success();return;
       }
       case 'clearTrace':if(this.agent.busy)throw new Error('Stop the task before clearing its flow.');await RunTrace.settled(this.traceUri().fsPath);await unlink(this.traceUri().fsPath).catch((e)=>{if(e.code!=='ENOENT')throw e;});await this.traceInfo(target);success();return;
       case 'cancelTestChat':this.chatTest?.abort();success();return;
       case 'storageInfo':this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:this.providers.preferences().storage?.retentionDays||0});return;
       case 'setStorage':await this.providers.setStorage(msg.retentionDays);await this.sessions.cleanup(msg.retentionDays);await this.state();this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:msg.retentionDays});success();return;
-      case 'cleanupStorage':if(this.agent.busy)throw new Error('Wait for the task to finish.');const retention=this.providers.preferences().storage?.retentionDays||0;if(!retention&&await vscode.window.showWarningMessage('Delete all completed sessions and their saved results?',{modal:true,detail:'This removes undo history. Workspace files are preserved.'},'Delete completed sessions')!=='Delete completed sessions'){success();return;}await this.sessions.cleanup(retention,true);this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:this.providers.preferences().storage?.retentionDays||0});success();return;
+      case 'cleanupStorage':if(this.agent.busy)throw new Error('Wait for the task to finish.');const retention=this.providers.preferences().storage?.retentionDays||0;if(!retention&&!await target.dialogs.confirm('Delete all completed sessions and their saved results?','This removes undo history. Workspace files are preserved.','Delete completed sessions')){success();return;}await this.sessions.cleanup(retention,true);this.post(target,{type:'storageInfo',...await this.sessions.storageInfo(),retentionDays:this.providers.preferences().storage?.retentionDays||0});success();return;
       case 'testTools':{
         if(this.agent.busy||this.chatTest)throw new Error('Wait for the current operation to finish.');
         const controller=new AbortController();this.chatTest=controller;const revision=this.providers.revision(msg.model);

@@ -19,6 +19,7 @@ export {};
       });
     }
     open(trigger,initial) {
+      document.dispatchEvent(new CustomEvent('vortex:overlay-open', {detail: 'picker'}));
       if(active)active.close(false);
       active=this;this.trigger=trigger;this.panel.hidden=false;trigger.setAttribute('aria-expanded','true');
       this.position();(initial||this.panel.querySelector('[aria-checked="true"],input,button'))?.focus();
@@ -30,6 +31,7 @@ export {};
     }
     close(focus=true){this.panel.hidden=true;this.trigger?.setAttribute('aria-expanded','false');if(active===this)active=undefined;if(focus)this.trigger?.focus();}
   }
+  document.addEventListener('vortex:overlay-open', event=>{if((event as CustomEvent).detail!=='picker')active?.close(false);});
   document.addEventListener('pointerdown',event=>{if(active&&!active.panel.contains(event.target)&&!active.trigger?.contains(event.target))active.close(false);});
   window.addEventListener('resize',()=>active?.position());
   new ResizeObserver(()=>active?.position()).observe(document.body);

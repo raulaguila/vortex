@@ -10,7 +10,7 @@ import {readStream} from './stream';
 import type {ToolDefinition} from './actions';
 export type Kind = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'compatible';
 export interface Provider { id: string; name: string; kind: Kind; baseUrl: string; tlsInsecure?: boolean; timeouts?:ModelTimeouts|null }
-export interface Message { role: 'user' | 'assistant'; content: string; toolCalls?:ToolCall[]; toolResult?:ToolResult; continuation?:unknown; continuationKind?:Kind }
+export interface Message { origin?:'vortex_orchestrator'; role: 'user' | 'assistant'; content: string; toolCalls?:ToolCall[]; toolResult?:ToolResult; continuation?:unknown; continuationKind?:Kind }
 export const defaults: Record<Kind, string> = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',gemini:'https://generativelanguage.googleapis.com/v1beta',ollama:'http://localhost:11434',compatible:''};
 export function validateUrl(value: string): string {
   const u = new URL(value);

@@ -20,3 +20,5 @@ tsconfig.webview.json
 .vscode-test/**
 .github/**
 baseline/**
+
+docs/design/**

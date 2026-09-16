@@ -1,3 +1,4 @@
+import type {PlanState} from './plan';
 import {defaults, Kind, Provider} from './providers';
 import {Mode,Permission,isMode,isPermission} from './policy';
 
@@ -17,11 +18,25 @@ export interface ModelLimits { tools?: boolean; input: number | null; output: nu
 export interface ChecklistItem { id: string; text: string; status: 'pending' | 'in_progress' | 'completed' }
 export interface SessionSummary { id: string; title: string; updatedAt: number }
 export interface SettingsState {diagnosticVersions?:Record<string,string>;effectiveProtocols?:Record<string,'native'|'compatibility'>; contextBudgets?: Record<string,{tokens:number;output:number;source:string}>; selectedContext?: {model:ModelRef;tokens:number;output:number;source:string} | null; providers: Connection[]; preferences: Preferences; limits: Record<string, ModelLimits> }
-export interface ActivityData {operation?:import('./operation').OperationState;sessionId?:string;outputRef?:string;truncated?:boolean;runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}
-export type RunPhase='preparing'|'context'|'waiting_model'|'receiving'|'compacting'|'approval'|'tool'|'summarizing'|'finishing'|'recovering';
+export interface ActivityData {plan?:{planId:string;version:number;stepId:string;attempt:number};operation?:import('./operation').OperationState;sessionId?:string;outputRef?:string;truncated?:boolean;runId:string;id:string;name:string;path?:string;status:'success'|'error'|'denied'|'recovered'|'cancelled'|'uncertain';output:string;startedAt:number;endedAt:number}
+export type RunPhase='validating_step'|'preparing'|'context'|'waiting_model'|'receiving'|'compacting'|'approval'|'question'|'tool'|'summarizing'|'finishing'|'recovering';
 export interface RunProgress {runId:string;phase:RunPhase;startedAt:number;phaseStartedAt:number;tool?:{id:string;name:string;path?:string}}
-export interface AgentEvent { failureCode?:string; activity?:ActivityData; incomplete?:boolean; role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
+export interface AgentEvent { interactionId?:string; failureCode?:string; activity?:ActivityData; incomplete?:boolean; role: 'user' | 'assistant' | 'activity'; text: string; timestamp?: number; durationMs?: number }
+export type Interaction = {id:string;runId:string} & (
+  | {kind:'approval';operation:'create'|'edit'|'delete'|'command'|'network';path?:string;detail?:string;preview:boolean;hunks?:{label:string;diff:string}[]}
+  | {kind:'question';question:string;options?:string[];recommended_option?:string}
+);
+export type InteractionReply = {id:string;decision:'approve'|'reject'|'answer'|'preview';answer?:string;hunks?:number[]};
+export interface DialogSpec {id:string;kind:'confirm'|'pick'|'input'|'notice'|'progress';title:string;detail?:string;accept?:string;value?:string;choices?:{id:string;label:string;description?:string}[]}
+export interface DialogReply {id:string;value:string|null}
 export type Request = (
+  | {type:'structureLegacyPlan';sessionId:string}
+  | {type:'approvePlan';sessionId:string;planId:string;version:number;permission:Permission}
+  | {type:'reviewStep';sessionId:string;planId:string;version:number;stepId:string;attempt:number;decision:'confirm'|'correct';comment:string}
+  | {type:'resumePlan';sessionId:string;planId:string;version:number;stepId?:string;attempt?:number}
+  | {type:'revisePlan';sessionId:string;planId:string;version:number;instruction:string}
+  | ({type:'respondDialog'} & DialogReply)
+  | ({type:'respondInteraction'} & InteractionReply)
   | {type:'openActivityOutput';sessionId:string;activityId:string}
   | {type:'recoveryInfo'}
   | {type:'recoverSession';id:string;kind:'backup'|'lock'}
@@ -57,6 +72,9 @@ export type Request = (
   | { type: 'stop' }
 ) & { requestId: string };
 export type Response =
+  | {type:'planState';sessionId:string;plan:PlanState|null;legacy:boolean}
+  | {type:'dialog';dialog:DialogSpec|null}
+  | {type:'interaction';interaction:Interaction|null}
   | {type:'recoveryInfo';items:{id:string;kind:'backup'|'lock'}[]}
   | {type:'persistenceState';failed:boolean}
   | {type:'activityUpdate';activity:ActivityData}
@@ -101,6 +119,12 @@ export function parseRequest(v: unknown): Request {
   if (!record(v) || !string(v.requestId, 100)) throw new Error('Mensagem inválida.');
   let valid = false;
   switch (v.type) {
+    case 'structureLegacyPlan':valid=string(v.sessionId,100);break;
+    case 'approvePlan':valid=string(v.sessionId,100)&&string(v.planId,100)&&Number.isSafeInteger(v.version)&&Number(v.version)>0&&isPermission(v.permission);break;
+    case 'resumePlan':case 'reviewStep':valid=string(v.sessionId,100)&&string(v.planId,100)&&Number.isSafeInteger(v.version)&&Number(v.version)>0&&(v.type==='resumePlan'&&v.stepId===undefined&&v.attempt===undefined||string(v.stepId,80)&&Number.isSafeInteger(v.attempt)&&Number(v.attempt)>0)&&(v.type==='resumePlan'||['confirm','correct'].includes(String(v.decision))&&typeof v.comment==='string'&&v.comment.length<=4000&&(v.decision==='confirm'||!!v.comment.trim()));break;
+    case 'revisePlan':valid=string(v.sessionId,100)&&string(v.planId,100)&&Number.isSafeInteger(v.version)&&Number(v.version)>0&&string(v.instruction,4000);break;
+    case 'respondDialog':valid=string(v.id,100)&&(v.value===null||typeof v.value==='string'&&v.value.length<=4096);break;
+    case 'respondInteraction':valid=string(v.id,100)&&['approve','reject','answer','preview'].includes(String(v.decision))&&(v.answer===undefined||string(v.answer,4000))&&(v.hunks===undefined||Array.isArray(v.hunks)&&v.hunks.length<=100&&v.hunks.every(n=>Number.isSafeInteger(n)&&n>=0)&&new Set(v.hunks).size===v.hunks.length)&&(v.decision==='answer'?string(v.answer,4000)&&v.hunks===undefined:v.answer===undefined)&&(v.hunks===undefined||v.decision==='approve');break;
     case 'openActivityOutput':valid=string(v.sessionId,100)&&string(v.activityId,100);break;
     case 'recoveryInfo':valid=true;break;
     case 'recoverSession':valid=string(v.id,100)&&['backup','lock'].includes(String(v.kind));break;

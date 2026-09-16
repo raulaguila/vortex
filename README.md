@@ -16,6 +16,36 @@ Instale `vortex-agent.vsix` por **Extensions → Install from VSIX**, ou execute
 
 Os comandos de build do Makefile sincronizam as dependências com `npm ci` na primeira execução e quando `package.json` ou `package-lock.json` mudam. Isso evita usar dependências antigas após `git pull`. Se `node_modules` tiver sido alterado manualmente, execute `make install` para restaurar as versões do lockfile. Ao usar npm diretamente, execute `npm ci` antes de `npm run package`.
 
+## Input do chat
+
+- O campo cresce com a mensagem. Os controles usam uma ou duas linhas conforme o espaço disponível, com 16 px de margem externa e 12 px internos.
+- **+** adiciona contexto. Digitar `@` no início do texto ou após um espaço também abre o seletor; e-mails e texto colado não o abrem. Anexos têm remoção individual e listas maiores podem ser expandidas.
+- Ask e Plan mostram **Somente leitura**. A política Supervisionado/Autônomo fica preservada para Agent, sem alterar as permissões de execução.
+- Durante uma execução, o texto digitado é um rascunho para enviar depois; não é enviado automaticamente. O botão de parar e o progresso continuam visíveis.
+- O contador abrevia os tokens. O tooltip mantém os valores exatos, a origem, a reserva de resposta e as mensagens omitidas. Perto do limite de entrada, o contador recebe destaque; a gestão do contexto continua automática.
+
+## Teste opcional com Ollama real
+
+```sh
+VORTEX_EVAL_URL=http://seu-ollama:11434 VORTEX_EVAL_MODEL=seu-modelo node test/ollama-host.cjs
+```
+
+Usa o VS Code instalado, um perfil separado e arquivos temporários. Verifica os seis pares modo/permissão, recusa de edição, transição Plan → Agent e interrupção com rascunho. Pedidos naturais de correção e de implementação com documentação são usados: as mensagens não pedem checklist, não ditam ferramentas e não repetem as restrições de leitura. O teste aciona as aprovações da interface apenas para `sum.js`, `README.md` nos cenários de múltiplas entregas e para comandos de teste conhecidos da fixture (`npm test` ou execução do teste com Node), após conferir que os testes não foram alterados. A janela é recarregada entre cenários para isolar os buffers após restaurar os arquivos da fixture. Relatórios e capturas ficam em `test-results/ollama-host/`. Para executar um subconjunto, use `VORTEX_EVAL_CASES=plan-to-agent,stop`; `VORTEX_EVAL_LABEL` separa os relatórios entre rodadas. Compile antes com `npm run compile`.
+
+## Execução controlada por etapas
+
+Plan investiga e apresenta uma proposta estruturada. No Agent, correções simples continuam diretas; trabalhos com várias entregas dependentes devem gerar uma proposta antes de implementar.
+
+1. Confira etapas, objetivos e critérios; clique em **Aprovar e implementar**.
+2. A extensão executa uma etapa por vez, mantendo as aprovações de ferramentas da permissão escolhida.
+3. Verificações automáticas exigem evidências de comandos da tentativa atual e correspondência com o workspace. Etapas verificadas avançam automaticamente.
+4. Critérios subjetivos ou sem correspondência comprovada aguardam **Confirmar resultado** ou **Pedir correção**. Verificações com falha não podem ser confirmadas.
+5. **Parar** interrompe a execução inteira. **Retomar etapa** inicia outra tentativa com releitura dos arquivos; alterações incertas nunca são repetidas automaticamente.
+
+O modelo usa `propose_plan` e `report_step_result`; somente a extensão altera o progresso. A aprovação vale para a versão mostrada. Revisar o plano exige nova aprovação. Os limites são compartilhados entre todas as etapas da rodada. Checklists antigos permanecem como registros não verificados e podem ser convertidos em uma nova proposta.
+
+Detalhes do contrato, recuperação, evidências e testes: [execução por etapas](docs/controlled-execution.md).
+
 ## Versão 0.10.0 — consolidação
 
 - Alterações têm registro durável por etapa. Se aplicar, salvar ou registrar falhar, a tarefa pausa para revisão; não repete a escrita nem desfaz automaticamente.
@@ -124,7 +154,7 @@ Ao esgotar etapas, uma rodada sem ferramentas pode resumir o progresso observado
 | Modo | Comportamento |
 | --- | --- |
 | Ask | Responde e consulta arquivos/diagnósticos; não altera arquivos nem executa shell. |
-| Plan | Investiga e prepara checklist; não implementa. |
+| Plan | Investiga e propõe um plano estruturado para aprovação; não implementa. |
 | Agent | Implementa e valida dentro da política selecionada. |
 
 **Supervised** solicita aprovação para alterações e comandos. **Autonomous** aplica alterações solicitadas e usa container local para comandos quando disponível. Sem Docker, o terminal exige aprovação no computador. Acesso à rede no container exige aprovação específica; não há repetição automática de comandos que falharam.
@@ -133,10 +163,13 @@ O executor impõe o modo independentemente do prompt. Saudações não iniciam f
 
 ### Revisão, desfazer e continuidade
 
-- Alterações supervisionadas abrem um diff no editor antes da aprovação. **Select hunks** aplica somente os trechos selecionados e encerra o turno quando há rejeição parcial.
+- Alterações supervisionadas aguardam em um cartão na sidebar, com arquivo, **Ver diff**, **Aprovar** e **Rejeitar**. O diff abre no editor somente quando solicitado. **Selecionar alterações** permite escolher trechos no próprio cartão; aplicar uma seleção parcial encerra o turno após gravar os trechos aprovados.
+- Comandos no host e pedidos de rede do sandbox também usam cartões na sidebar. Cada aprovação vale somente para aquela ação; respostas antigas ou duplicadas são rejeitadas.
+- A ferramenta `ask_user` mostra a pergunta na sidebar, com opções clicáveis e resposta livre. Escolher uma opção não envia automaticamente: o usuário confirma em **Enviar resposta**. `Ctrl/Cmd+Enter` também envia; `Shift+Enter` quebra linha. Cancelar interrompe a tarefa. A pergunta e a resposta permanecem na conversa, e a resposta retorna ao modelo como resultado da ferramenta.
+- **Stop** durante a espera por aprovação remove o cartão sem executar a ação; operações já iniciadas continuam sujeitas à revisão quando o resultado é incerto. O rascunho do chat é preservado. Reabrir a webview durante uma espera recupera o pedido pendente, sem aprová-lo.
 - **Review changes** mostra o registro da tarefa. **Undo task changes** restaura apenas versões ainda correspondentes às alterações do agente; conflitos e buffers não salvos são preservados.
 - O registro é salvo antes da aplicação. Comandos executados diretamente no computador não têm garantia de reversão.
-- **Implement plan** pede a permissão e inicia explicitamente Agent. **Continue** usa o progresso salvo; ferramentas de resultado incerto exigem revisão e nova instrução antes da retomada.
+- **Aprovar e implementar** autoriza a versão apresentada e inicia Agent. **Retomar etapa** continua planos pausados. **Continue** permanece para tarefas diretas; ferramentas de resultado incerto exigem revisão antes da retomada.
 - Limites em **Settings → Execution**: 20 rodadas de trabalho, 20 chamadas de ferramentas, 60 s por comando, 30 min por tarefa e orçamento de tokens opcional. São configuráveis. Orçamento de tokens não representa um limite financeiro exato.
 
 ### Contexto e histórico
@@ -199,3 +232,28 @@ Cada mensagem inicia um novo `last-flow.json` no armazenamento local do workspac
 O formato segue o exemplo de rastreamento: `conversation_id`, `model`, `temperature`, `max_tokens`, `system_prompt`, `user_question`, `turns` (request/response), `final_answer` e `sources`. Cada rodada contém o histórico enviado, definições de ferramentas e resposta recebida, normalizados entre provedores. Streaming é registrado como resposta acumulada, sem eventos individuais. Parâmetros não enviados ficam `null`; falhas ficam na resposta da rodada. Retentativas HTTP internas pertencem à mesma rodada.
 
 O arquivo recebe snapshots em segundo plano antes e depois das chamadas, inclusive nos resumos; a finalização aguarda a última gravação. Não inclui headers de autenticação e remove a chave configurada. Pode conter código, prompts e dados retornados pelas ferramentas; revise antes de compartilhar. Não é enviado automaticamente nem incluído no repositório. Falha de gravação é informada sem interromper o agente.
+
+### Interações dentro do Vortex
+
+Confirmações, seleção de contexto, revisão/Undo, recuperação e exclusão de sessões,
+exportação do fluxo e configuração do sandbox usam a interface do Vortex. Os diálogos
+abrem na sidebar ou na aba de configurações que iniciou a operação, com busca,
+navegação por teclado, Escape para cancelar e mensagens de validação no formulário.
+As aprovações de ferramentas e perguntas da IA continuam nos cartões da conversa.
+
+- Adicionar contexto permite selecionar arquivo, seleção do editor, pasta ou diagnósticos.
+- Exportar fluxo solicita o caminho completo do JSON e confirma antes de substituir um arquivo.
+- Fechar a aba cancela solicitações pendentes; respostas antigas não autorizam novas operações.
+- Abrir um diff ou documento continua usando o editor do VS Code.
+
+## Sidebar compacta e perguntas integradas
+
+O input reúne modo e permissão como ícones, modelo e enviar/parar. Os nomes e descrições continuam disponíveis pelo mouse, teclado e menus. Perguntas da IA aparecem dentro do composer, com opções ou resposta escrita e envio explícito; o rascunho normal fica preservado. O plano permanece no topo e abre sobre a conversa, com etapas compactas e detalhes expansíveis.
+
+Veja as [referências aprovadas, capturas implementadas e validação](docs/design/README.md).
+
+## Estabilização 0.11.0
+
+O contrato de planejamento foi simplificado: a extensão atribui os IDs, vincula respostas à etapa e executa as verificações aprovadas. Aprovar um plano autoriza suas operações de arquivo e comandos exatos; ampliações pedem autorização na sidebar. Falhas conhecidas de teste permitem até duas correções.
+
+Veja [comportamento e validação](docs/stabilization-0.11.0.md). `make test-stability` executa a matriz real com Gemma e Qwen usando o VSIX em perfis descartáveis. Testes simulados não demonstram confiabilidade autônoma; a matriz e o teste real de Docker precisam estar aprovados.

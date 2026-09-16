@@ -80,19 +80,26 @@ test('denied actions end the turn without allowing an alternative tool',async()=
   assert.equal(attempts,1);assert.equal(h.calls.length,1);
   assert.ok(h.events.some(e=>e.type==='event'&&e.event.role==='activity'&&(e.event.activity?.status==='denied'||e.event.text.includes('denied'))));
 });
+test('Stop while awaiting approval is known not executed, not an uncertain mutation',async()=>{
+ const h=harness([{action:'write_file',path:'a',content:'x'}]);let waiting;
+ const started=new Promise(resolve=>waiting=resolve);
+ h.agent.execute=()=>h.agent.approval(()=>{waiting();return new Promise(()=>{});});
+ const run=h.run('Create the requested file');await started;h.agent.stop();await run;
+ assert.equal(h.agent.session.pendingTool,undefined);
+ assert.ok(h.events.some(e=>e.type==='event'&&e.event.activity?.status==='cancelled'));
+ assert.ok(!h.events.some(e=>e.type==='event'&&e.event.activity?.status==='uncertain'));
+ assert.match(h.agent.messages.findLast(m=>m.toolResult).toolResult.output,/not executed/);
+});
 test('read-only modes reject write attempts before the tool dispatcher',async()=>{
   for(const mode of ['ask','plan'])for(const permission of ['supervised','autonomous']){
     const h=harness([{action:'write_file',path:'a',content:'x'},{action:'finish',text:'Switch to Agent to implement.'}]);
     await h.run('Implement the change',mode,permission);assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
   }
 });
-test('planning executor accepts pending steps and rejects fabricated completion',async()=>{
-  const agent=new AgentController({},()=>{},{});const signal=new AbortController().signal;
-  const items=[{id:'a',text:'Implement login',status:'pending'}];
-  await agent.execute({action:'update_plan',items},'plan',undefined,signal);
-  await assert.rejects(agent.execute({action:'update_plan',items:[{...items[0],status:'completed'}]},'plan',undefined,signal),/cannot mark/);
-  await assert.rejects(agent.execute({action:'update_plan',items},'ask',undefined,signal),/not allowed/);
-  assert.equal(agent.checklist[0].status,'pending');
+test('legacy checklist updates are unavailable and cannot fabricate completion',async()=>{
+ const agent=new AgentController({},()=>{},{}),signal=new AbortController().signal;
+ for(const mode of ['ask','plan','agent'])await assert.rejects(agent.execute({action:'update_plan',items:[{id:'a',text:'x',status:'completed'}]},mode,undefined,signal),/not allowed/);
+ assert.deepEqual(agent.checklist,[]);
 });
 
 test('mode and permission are supplied independently to the executor and prompt',async()=>{
@@ -144,14 +151,15 @@ test('read versions reject later external modifications or deletion',()=>{
  assert.doesNotThrow(()=>h.agent.verifyRead({path:'/workspace/a',content:'before'}));
  assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:'after'}),/changed/);
  assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:null}),/changed/);
- h.agent.run=new AbortController();assert.throws(()=>h.agent.verifyRead({path:'/workspace/b',content:'existing'}),/Read the existing/);
+ h.agent.run=new AbortController();assert.throws(()=>h.agent.verifyRead({path:'/workspace/src/b',content:'existing'},'src/b'),e=>e.message.includes('current turn')&&e.message.includes('read_file')&&e.message.includes('\"path\":\"src/b\"'));
+ h.agent.readVersions.set('/workspace/src/b',contentVersion('existing'));assert.doesNotThrow(()=>h.agent.verifyRead({path:'/workspace/src/b',content:'existing'},'src/b'));
 });
 
 test('task controls reflect saved outcomes and actual change availability',async()=>{
  const h=harness([]);h.agent.session={id:'session',mode:'ask',runState:'complete'};await h.agent.taskState();let state=h.events.at(-1);assert.equal(state.resume,false);assert.equal(state.reviewChanges,false);assert.equal(state.implementPlan,false);
  h.agent.session.runState='paused';await h.agent.taskState();assert.equal(h.events.at(-1).resume,true);
  h.agent.session.pendingTool={name:'run_command'};await h.agent.taskState();assert.equal(h.events.at(-1).resume,true);
- h.agent.session.mode='plan';h.agent.checklist=[{id:'a',text:'Do work',status:'pending'}];h.agent.reviews={availability:async()=>({reviewChanges:true,undoChanges:true})};await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,true);assert.equal(h.events.at(-1).undoChanges,true);
+ h.agent.session.mode='plan';h.agent.checklist=[{id:'a',text:'Do work',status:'pending'}];h.agent.reviews={availability:async()=>({reviewChanges:true,undoChanges:true})};await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,false);assert.equal(h.events.at(-1).undoChanges,true);
  h.agent.run=new AbortController();await h.agent.taskState();assert.equal(h.events.at(-1).implementPlan,false);assert.equal(h.events.at(-1).undoChanges,false);
 });
 
@@ -246,3 +254,9 @@ test('quoted false editor flag executes once as false and keeps the original nat
 
 test('uncertain outcomes require explicit review confirmation before another run',async()=>{const h=harness([{action:'finish',text:'Reviewed.'}]);h.agent.session={id:'fixture',mode:'ask',permission:'supervised',model:{providerId:'p',modelId:'m'},pendingTool:{name:'run_command'}};h.agent.host.confirmUncertain=async()=>false;await assert.rejects(h.run('Continue after review','ask'),/Review the workspace/);assert.equal(h.calls.length,0);assert.equal(h.agent.session.pendingTool.name,'run_command');h.agent.host.confirmUncertain=async()=>true;await h.run('Continue after review','ask');assert.equal(h.calls.length,1);assert.equal(h.agent.session.pendingTool,undefined);});
 test('response budget is frozen for a running task',async()=>{const h=harness([{action:'read_file',path:'a'},{action:'finish',text:'Done'}]);h.agent.providers.contextBudget=()=>({tokens:16384,output:h.calls.length?1000:4096,source:'custom'});await h.run('Read a','ask');assert.equal(h.calls[0][4].output,4096);assert.equal(h.calls[1][4].output,4096);});
+
+test('explicit planning completion guard does not classify conceptual questions or quoted examples',()=>{
+ const {isExplicitPlanningRequest}=require('../dist/intent');
+ for(const text of ['planeje as mudanças','Por favor, planeje a correção','Crie um plano','Atualize o plano','Plan an update','Please, revise the plan'])assert.equal(isExplicitPlanningRequest(text),true,text);
+ for(const text of ['oi','What is a plan?','Explique o planejamento','Plan mode vs Ask mode?','Translate "Plan an update"','O projeto tem um plano?'])assert.equal(isExplicitPlanningRequest(text),false,text);
+});

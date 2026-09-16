@@ -1,3 +1,4 @@
+import {setupDialogs} from './dialogs';
 import {onHostMessage} from './messages';
 import type {SettingsState} from '../src/protocol';
 export {};
@@ -152,7 +153,7 @@ onHostMessage(m=>{
  if(m.type==='settingsSection'){switchSection(m.section);return;}
  if(m.type==='traceInfo'){$('trace-location').textContent=m.path;$('trace-size').textContent=m.exists?(m.bytes/1024).toFixed(1)+' KB':window.VortexUI.t('No saved flow yet.');$('open-trace').disabled=$('export-trace').disabled=!m.exists;return;}
  if(m.type==='chatTestResult'){testChatPending=false;$('test-chat').disabled=busy;$('cancel-chat-test').hidden=true;notice('chat-test-result',(m.ok?'OK · ':'')+m.elapsed+' ms · '+m.protocol+' · '+m.message,!m.ok);pending.delete(m.requestId);return;}
- if(m.type!=='result')return;const context=pending.get(m.requestId);pending.delete(m.requestId);if(!context)return;
+ if(m.type!=='result')return;const context=pending.get(m.requestId);pending.delete(m.requestId);if(!context||context.type==='respondDialog')return;
  if(context.section){savingSection=undefined;if(m.ok){delete drafts[context.section];renderState(savedState);}sectionState(context.section,m.ok?'Saved.':m.message,!m.ok);return;}
  if(context.type==='setExecution'){executionPending=false;saveExecution.disabled=false;executionForm.querySelectorAll('input').forEach(input=>input.disabled=false);if(m.ok)executionDirty=false;notice('execution-notice',m.ok?window.VortexUI.t('Execution limits saved.'):m.message||window.VortexUI.t('Could not save execution limits.'),!m.ok);return;}
  if(['saveProvider','testProvider'].includes(context.type)){
@@ -160,11 +161,13 @@ onHostMessage(m=>{
   if(m.ok&&context.type==='saveProvider'){editingId=m.providerId;$('form-title').textContent='Editar conexão';$('provider-key').value='';$('clear-key').checked=false;keyHelp();}
   notice('form-notice',m.message,!m.ok);updateBusy(busy);return;
  }
+ if(['setupSandbox','exportTrace','openTrace','cleanupStorage','recoverSession'].includes(context.type)&&m.ok&&!m.message)return;
  if(context.type==='manualModel'&&m.ok&&context.manualValue===$('manual-id').value)$('manual-id').value='';
  if(context.type==='removeProvider'&&m.ok&&context.id===editingId)closeForm();
  notice('settings-notice',m.message||(m.ok?'Salvo.':'Não foi possível salvar.'),!m.ok);
  if(!m.ok)request('ready');
 });
+setupDialogs(reply=>request('respondDialog',reply));
 switchSection('providers');request('ready');
 
 $('provider-dialog').addEventListener('cancel',e=>{if(formPending?.kind==='save')e.preventDefault();else closeForm();});

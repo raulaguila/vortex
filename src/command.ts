@@ -2,8 +2,11 @@ import {ExecutionError} from './execution';
 import {spawn,execFile} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 
+export interface CommandResult {exit_code:number|null;cancelled:boolean;output:string}
+export class CommandFailure extends Error {constructor(readonly commandResult:CommandResult){super(commandResult.output);}}
+export async function runCommand(...args:Parameters<typeof runCommandDetailed>):Promise<string>{return (await runCommandDetailed(...args)).output;}
 // A process group lets Stop/timeout terminate the shell and its ordinary descendants.
-export function runCommand(command:string,cwd:string,signal:AbortSignal,timeout=60000,maxBytes=1024*1024,onOutput?:(stream: 'stdout'|'stderr',text:string)=>void):Promise<string>{
+export function runCommandDetailed(command:string,cwd:string,signal:AbortSignal,timeout=60000,maxBytes=1024*1024,onOutput?:(stream: 'stdout'|'stderr',text:string)=>void):Promise<CommandResult>{
   signal.throwIfAborted();
   return new Promise((resolve,reject)=>{
     const child=spawn(command,{cwd,shell:true,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe']});
@@ -28,7 +31,7 @@ export function runCommand(command:string,cwd:string,signal:AbortSignal,timeout=
     child.once('close',(code)=>{
       if(finished)return;cleanup();
       const output=`Exit: ${code??'interrupted'}\n${stdout+decoders.stdout.end()}\n${stderr+decoders.stderr.end()}`;
-      if(reason){reason.message+='\n'+output;reject(reason);}else if(code!==0)reject(new Error(output));else resolve(output);
+      const result={exit_code:code,cancelled:!!reason,output};if(reason){reason.message+='\n'+output;Object.assign(reason,{commandResult:result});reject(reason);}else if(code!==0)reject(new CommandFailure(result));else resolve(result);
     });
     if(signal.aborted)aborted();
   });

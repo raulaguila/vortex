@@ -21,8 +21,9 @@ export class RunTrace {
  private secrets:string[]=[];
  private data:Record<string,any>;
  constructor(readonly path:string,metadata:Record<string,any>,private onError:()=>void=()=>{}){RunTrace.owners.set(path,this.id);this.data={conversation_id:metadata.sessionId,model:metadata.model.modelId,temperature:null,max_tokens:null,system_prompt:'',user_question:metadata.prompt||'',turns:[],final_answer:'',sources:[]};}
+ binding(value:ReturnType<typeof import('./modelRequest').requestBinding>){(this.data.request_bindings??=[]).push({...value,contract_version:2});}
  addSecret(secret:string){if(secret)this.secrets.push(secret);}
- prepare(system:string,history:Message[]){this.logical=[{role:'system',content:system},...history.map(m=>m.toolResult?{role:'tool',content:m.toolResult.output,tool_call_id:m.toolResult.id,tool_name:m.toolResult.name}:{role:m.role,content:m.content,...(m.toolCalls?.length?{tool_calls:calls(m.toolCalls)}:{})})];}
+ prepare(system:string,history:Message[]){this.logical=[{role:'system',content:system},...history.map(m=>m.toolResult?{role:'tool',content:m.toolResult.output,tool_call_id:m.toolResult.id,tool_name:m.toolResult.name}:{role:m.role,content:m.content,...(m.origin?{origin:m.origin}:{}),...(m.toolCalls?.length?{tool_calls:calls(m.toolCalls)}:{})})];}
  async save(){this.dirty=true;if(!this.scheduled)this.scheduled=setTimeout(()=>{this.scheduled=undefined;void this.flush();},20);}
  async flush(){
   clearTimeout(this.scheduled);this.scheduled=undefined;if(!this.dirty){await RunTrace.queues.get(this.path);return;}this.dirty=false;
@@ -40,7 +41,9 @@ export class RunTrace {
  this.logical=undefined;const known=new Map<string,any>();const sources=[];for(const row of rows){for(const call of row.tool_calls||[])known.set(call.id,call);if(row.role==='tool'){const call=known.get(row.tool_call_id);row.tool_name??=call?.name;sources.push({tool:row.tool_name||'',input:call?.input||'{}',result:row.content});}}this.data.sources=sources;
  const max=body.max_tokens??body.max_completion_tokens??body.options?.num_predict??body.generationConfig?.maxOutputTokens??null;
  if(!this.data.turns.length){this.data.system_prompt=rows.find(m=>m.role==='system')?.content||'';this.data.max_tokens=max;this.data.temperature=body.temperature??null;}
- const entry={iteration:this.data.turns.length+1,request:{Model:body.model||this.data.model,Messages:rows,Tools:tools,Temperature:body.temperature??null,MaxTokens:max},response:null};
+ const context=rows.find(m=>m.role==='system')?.content?.match(/<execution_context>([\s\S]*?)<\/execution_context>/)?.[1];
+ let orchestration;try{orchestration=context?JSON.parse(context):undefined;}catch{}
+ const entry={binding:this.data.request_bindings?.at(-1),iteration:this.data.turns.length+1,...(orchestration?{orchestration}:{}),request:{Model:body.model||this.data.model,Messages:rows,Tools:tools,Temperature:body.temperature??null,MaxTokens:max},response:null};
  this.data.turns.push(entry);await this.save();return this.data.turns.length-1;
  }
  async response(index:number,result:unknown,error?:string,kind:Kind='compatible'){
@@ -63,6 +66,7 @@ export class RunTrace {
   if(validationError)response.validation_error=validationError;
   await this.save();
  }
+ async plan(plan:import('./plan').PlanState){const state=structuredClone(plan);(this.data.plan_transitions??=[]).push({at:Date.now(),plan_id:state.plan_id,version:state.version,execution_id:state.execution_id,status:state.status,active_step:state.active_step,steps:state.executions.map(e=>({id:e.id,status:e.status,attempt:e.attempts.at(-1)?.number,criteria:e.attempts.at(-1)?.criteria}))});this.data.plan=state;await this.save();}
  async finish(status:string,history:Message[]){
  this.data.final_answer=status==='complete'?(history.at(-1)?.role==='assistant'?history.at(-1)!.content:''):'';
  const sources:any[]=[],known=new Map();for(const m of history){for(const call of m.toolCalls||[])known.set(call.id,call);if(m.toolResult){const call=known.get(m.toolResult.id);sources.push({tool:m.toolResult.name,input:JSON.stringify(call?.arguments||{}),result:m.toolResult.output});}}

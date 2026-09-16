@@ -23,7 +23,8 @@ const root=path.resolve(__dirname,'..');
       if(/^Summarize/.test(payload.messages?.[0]?.content||'')){res.end(JSON.stringify({message:{content:'Earlier fixture actions are recorded in the saved history. Preserve the current request, mode and approvals.'}}));return;}
       const retryDiscovery=lastFixtureAction?.action==='list_files'&&String(payload.messages?.at(-1)?.content).includes('Workspace changed during discovery. Restart the query.');
       if(retryDiscovery)await new Promise(resolve=>setTimeout(resolve,250));
-      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];const action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read_file',path:'vortex-connection-probe.txt'}):retryDiscovery?lastFixtureAction:scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      const probe=JSON.stringify(payload).includes('vortex-connection-probe.txt'),nonce=JSON.stringify(payload).match(/Verification code: ([a-f0-9-]{36})/)?.[1];let action=probe?(nonce?{action:'finish',text:'Verified '+nonce}:{action:'read_file',path:'vortex-connection-probe.txt'}):retryDiscovery?lastFixtureAction:scripted.shift()||{action:'finish',text:'Conexão validada no Extension Host com provedor local simulado.'};
+      if(action.action==='report_fixture_step'){const stale=action.stale;action={action:'report_step_result',outcome:'completed',summary:'Work ready for verification',...(stale?{step_id:'previous-step'}:{})};}
       lastFixtureAction=action;
       if(payload.tools){const {action:name,...args}=action;res.end(JSON.stringify({done:true,done_reason:'stop',message:name==='finish'?{content:action.text}:{content:'',tool_calls:[{id:'call-'+Date.now(),function:{name,arguments:args}}]}}));}
       else res.end(JSON.stringify({message:{content:JSON.stringify(action)}}));return;
@@ -80,46 +81,75 @@ const root=path.resolve(__dirname,'..');
     await settings.locator('#test-tools').click();await settings.locator('#tools-test-result').filter({hasText:'Tools: validated'}).waitFor();
     await settings.locator('#output-limit').fill('8000');await settings.locator('#save-models').click();await frame.waitForFunction(()=>window.testStates.some(s=>Object.values(s.preferences.outputTokens||{}).includes(8000)));
     await settings.locator('#nav-diagnostics').click();await settings.locator('#trace-location').filter({hasText:'last-flow.json'}).waitFor();const tracePath=await settings.locator('#trace-location').innerText();const flow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.ok(flow.turns.length);assert.ok(!flow.user_question.includes('Reply OK.'));await settings.locator('#open-trace').click();
+    // Settings-local export with validation, overwrite cancellation and no native dialog.
+    await frame.locator('#open-settings').click();await settings.locator('#nav-diagnostics').click();
+    await settings.locator('#export-trace').click();await settings.locator('#vortex-dialog-input').fill('relative.json');await settings.locator('#vortex-dialog-accept').click();
+    await settings.locator('#vortex-dialog-error').filter({hasText:'absolute path'}).waitFor();
+    const exported=path.join(temp,'exported-flow.json');await settings.locator('#vortex-dialog-input').fill(exported);await settings.locator('#vortex-dialog-accept').click();await settings.locator('#vortex-dialog-title').filter({hasText:'Flow exported.'}).waitFor();await settings.locator('#vortex-dialog-accept').click();
+    assert.deepEqual(JSON.parse(await fs.readFile(exported,'utf8')),flow);
+    await fs.writeFile(exported,'preserve');await settings.locator('#export-trace').click();await settings.locator('#vortex-dialog-input').fill(exported);await settings.locator('#vortex-dialog-accept').click();await settings.locator('#vortex-dialog-title').filter({hasText:'Replace existing file?'}).waitFor();await settings.locator('#vortex-dialog-cancel').click();assert.equal(await fs.readFile(exported,'utf8'),'preserve');
+    assert.equal(await window.locator('.monaco-dialog-box').isVisible(),false);
+    // Sandbox notices stay in settings. This fixture deliberately has no Docker.
+    await settings.locator('#nav-execution').click();await settings.getByRole('button',{name:'Download sandbox image',exact:true}).click();await settings.locator('#vortex-dialog-title').filter({hasText:'Install and start'}).waitFor();await settings.locator('#vortex-dialog-accept').click();
     // A native editor call is read-only in Ask; invalid arguments receive a correlated correction.
     scripted=[{action:'get_editor_context',include_selection:{start_line:1}},{action:'get_editor_context',include_selection:false},{action:'finish',text:'Editor recovery validated in Ask.'}];await frame.locator('#prompt').fill('Describe the files open in this workspace');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Editor recovery validated in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
     const recoveredFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(recoveredFlow.turns.length,3);assert.equal(recoveredFlow.turns[0].response.stop_reason,'tool_use');assert.equal(recoveredFlow.turns[0].response.provider_stop_reason,'stop');assert.match(recoveredFlow.turns[0].response.validation_error,/include_selection must be a boolean/);assert.equal(recoveredFlow.turns[1].request.Messages.find(m=>m.role==='tool').tool_call_id,recoveredFlow.turns[0].response.tool_calls[0].id);assert.equal(recoveredFlow.turns[2].response.stop_reason,'stop');assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
     // Quoted false must stay false, never become a request for selected text.
     scripted=[{action:'get_editor_context',include_selection:'false'},{action:'finish',text:'Quoted editor flag accepted in Ask.'}];await frame.locator('#prompt').fill('Identify the open workspace files');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Quoted editor flag accepted in Ask.'}).waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
     const quotedFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(quotedFlow.turns.length,2);assert.equal(quotedFlow.turns[0].response.validation_error,undefined);assert.equal(JSON.parse(quotedFlow.turns[0].response.tool_calls[0].input).include_selection,'false');const quotedResult=quotedFlow.turns[1].request.Messages.find(m=>m.role==='tool'&&m.tool_call_id===quotedFlow.turns[0].response.tool_calls[0].id);assert.ok(quotedResult);assert.equal(JSON.parse(quotedResult.content).selection,undefined);assert.deepEqual(await fs.readdir(path.join(temp,'workspace')),[]);
-    // Exercise the actual approval dialog and WorkspaceEdit with a disposable file.
+    // Exercise the actual sidebar approval card and WorkspaceEdit with a disposable file.
     const approvalFile=path.join(temp,'workspace','approval.txt');await fs.writeFile(approvalFile,'original');
+    // Context selection is searchable in the sidebar and preserves the draft.
+    await frame.locator('#prompt').fill('Context draft');await frame.locator('#attach-context').click();await frame.locator('.vortex-dialog-choice').filter({hasText:/^File$/}).click();
+    await frame.locator('#vortex-dialog-search').fill('approval.txt');await frame.locator('.vortex-dialog-choice').filter({hasText:'approval.txt'}).click();
+    assert.equal(await frame.locator('#prompt').inputValue(),'Context draft');await frame.locator('.context-chip').filter({hasText:'approval.txt'}).waitFor();
+    await frame.locator('.context-chip button').first().click();
+    await frame.locator('#attach-context').click();await frame.locator('.vortex-dialog-choice').filter({hasText:/^Folder$/}).click();await frame.locator('.vortex-dialog-choice').filter({hasText:'Use this folder'}).click();await frame.locator('.context-chip').filter({hasText:'approval.txt'}).waitFor();await frame.locator('.context-chip button').first().click();
     await frame.locator('#mode-trigger').click();await frame.locator('.choice-option').filter({hasText:'Explore and implement'}).click();
     await frame.locator('#prompt').fill('Change approval.txt to updated');
     scripted=[{action:'read_file',path:'approval.txt'},
       {action:'edit_file',path:'approval.txt',old_text:'original',new_text:'updated'}];
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-    const dialog=window.locator('.monaco-dialog-box');await dialog.waitFor();
+    const dialog=window.locator('.monaco-dialog-box');let approval=frame.locator('#interaction-card');await approval.waitFor();assert.equal(await dialog.isVisible(),false);
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
-    await dialog.getByRole('button',{name:/Cancel/}).click();
+    await frame.locator('#interaction-reject').click();
     await frame.locator('.message-body').filter({hasText:'Approval denied'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
     scripted=[{action:'read_file',path:'approval.txt'},
       {action:'edit_file',path:'approval.txt',old_text:'original',new_text:'updated'},{action:'finish',text:'Approved edit completed.'}];
     await frame.locator('#prompt').fill('Apply the change to approval.txt');
     await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-    await dialog.waitFor();assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
-    await dialog.getByRole('button',{name:/Permitir/}).click();
+    await approval.waitFor();assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
+    await frame.locator('#interaction-preview').click();await window.locator('.tab.active').filter({hasText:'approval.txt'}).waitFor();assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
+    await frame.locator('#interaction-approve').click();
     await frame.locator('.message-body').filter({hasText:'Approved edit completed.'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');
     scripted=[{action:'read_file',path:'approval.txt'},
       {action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'bad stale edit'},{action:'finish',text:'Concurrent edit preserved.'}];
     await frame.locator('#prompt').fill('Update approval.txt once more');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-    await dialog.waitFor();await fs.writeFile(approvalFile,'external edit');
-    await dialog.getByRole('button',{name:/Permitir/}).click();
+    await approval.waitFor();await fs.writeFile(approvalFile,'external edit');
+    await frame.locator('#interaction-approve').click();
     await frame.locator('.message-body').filter({hasText:'Concurrent edit preserved.'}).waitFor();
     assert.equal(await fs.readFile(approvalFile,'utf8'),'external edit');await fs.writeFile(approvalFile,'updated');
+    // Stop removes the pending request without applying it.
+    scripted=[{action:'read_file',path:'approval.txt'},{action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'must not apply'}];
+    await frame.locator('#prompt').fill('Change approval.txt');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await approval.waitFor();
+    await frame.locator('#prompt').fill('My next draft');await frame.locator('#stop').click();await approval.waitFor({state:'hidden'});await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');assert.equal(await frame.locator('#prompt').inputValue(),'My next draft');
+    // Both hunk selection and the resulting partial application stay in the sidebar.
+    const hunkFile=path.join(temp,'workspace','hunks.txt'),hunkOriginal=Array.from({length:30},(_,i)=>'line '+i).join('\n');await fs.writeFile(hunkFile,hunkOriginal);
+    scripted=[{action:'read_file',path:'hunks.txt'},{action:'edit_file_batch',path:'hunks.txt',edits:[{old_text:'line 1\n',new_text:'changed 1\n'},{old_text:'line 25\n',new_text:'changed 25\n'}]}];
+    await frame.locator('#prompt').fill('Update two separate lines in hunks.txt');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await approval.waitFor();
+    await frame.locator('.interaction-hunks summary').click();assert.equal(await frame.locator('.interaction-hunk input').count(),2);await frame.locator('.interaction-hunk input').last().uncheck();
+    assert.equal(await fs.readFile(hunkFile,'utf8'),hunkOriginal);await frame.locator('#interaction-approve').click();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    assert.equal(await fs.readFile(hunkFile,'utf8'),hunkOriginal.replace('line 1\n','changed 1\n'));assert.equal(await frame.locator('#run-status').innerText(),'Stopped');
     // All mode/permission pairs pass through the real webview and controller.
     async function choose(kind,value){await frame.locator('#'+kind+'-trigger').click();await frame.locator('.choice-option').filter({hasText:value}).click();}
     async function send(prompt,replies,expected){scripted=replies;await frame.locator('#prompt').fill(prompt);await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:expected}).waitFor();}
     await fs.writeFile(path.join(temp,'workspace','README.md'),'Workspace fixture');
     await fs.writeFile(path.join(temp,'workspace','filter-fixture.txt'),'needle fixture');
     await send('List matching project files',[
-      {action:'list_files',patterns:['*.txt','README.md','*.txt'],exclude_patterns:['approval.txt']},
+      {action:'list_files',patterns:['*.txt','README.md','*.txt'],exclude_patterns:['approval.txt','hunks.txt']},
       {action:'finish',text:'Multiple filters verified.'}],'Multiple filters verified.');
     await frame.waitForFunction(()=>document.getElementById('stop').hidden);
     const filterFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));
@@ -150,27 +180,48 @@ const root=path.resolve(__dirname,'..');
       {action:'list_files',patterns:['**/*']},
       {action:'finish',text:'Workspace inspection completed after announcement recovery.'}
     ],'Workspace inspection completed after announcement recovery.');
-    await send('Plan an update to approval.txt',[
-      {action:'update_plan',items:[{id:'implement',text:'Update approval.txt',status:'pending'}]},
-      {action:'finish',text:'Plan ready for implementation.'}],'Plan ready for implementation.');
-    assert.equal(await frame.locator('#checklist-items li').count(),1);
-    await choose('mode','Explore and implement');
-    assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
-    await send('Implement the plan for approval.txt',[
-      {action:'read_file',path:'approval.txt'},
-      {action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'autonomous'},
-      {action:'update_plan',items:[{id:'implement',text:'Update approval.txt',status:'completed'}]},
-      {action:'finish',text:'Autonomous implementation verified.'}],'Autonomous implementation verified.');
-    assert.equal(await fs.readFile(approvalFile,'utf8'),'autonomous');
-    assert.equal(await dialog.isVisible(),false);
+    const planProposal={action:'propose_plan',objective:'Update and verify approval.txt',steps:[
+      {files:[{path:'approval.txt',operation:'edit'}],title:'Update file',objective:'Change updated to autonomous',depends_on:[],criteria:[{description:'File contains the expected text',verification:'command',command:'node -e "if(require(\'fs\').readFileSync(\'approval.txt\',\'utf8\')!==\'autonomous\')process.exit(1)"',cwd:'.'}]},
+      {title:'Verify again',objective:'Run an independent check',depends_on:[1],criteria:[{description:'Node is available',verification:'command',command:'node --version',cwd:'.'}]},
+      {title:'Review result',objective:'Review the final fixture',depends_on:[2],criteria:[{description:'The user confirms the result',verification:'human'}]}
+    ]};
+    await choose('mode','Explore and implement');await choose('permission','Ask before editing');await choose('mode','Analyze and create');
+    const invalidProposal=structuredClone(planProposal);delete invalidProposal.steps[0].criteria[0].description;
+    scripted=[invalidProposal,{action:'finish',text:'The plan was proposed. Switch to Agent.'},planProposal];await frame.locator('#prompt').fill('planeje as mudanças');await frame.locator('#send').click();await frame.locator('#plan-toggle').waitFor();await frame.locator('#plan-toggle').click();await frame.locator('#plan-approve').waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    assert.equal(await frame.locator('.plan-step').count(),3);assert.equal(await fs.readFile(approvalFile,'utf8'),'updated');
+    assert.equal(await frame.locator('.message-body').filter({hasText:'The plan was proposed. Switch to Agent.'}).count(),0);
+    const proposalFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.equal(proposalFlow.turns.length,3);assert.match(proposalFlow.turns[0].response.validation_error,/description is required/);assert.match(proposalFlow.turns[1].response.validation_error,/structured plan is still required/);assert.equal(proposalFlow.plan.status,'proposed');
+    await frame.locator('#prompt').fill('Keep the plan draft');
+    scripted=[{action:'finish',text:'Please approve the plan again.'},{action:'read_file',path:'approval.txt'},{action:'edit_file',path:'approval.txt',old_text:'updated',new_text:'autonomous'},
+      {action:'report_fixture_step'},
+      {action:'report_fixture_step',stale:true},{action:'report_fixture_step'},{action:'read_file',path:'approval.txt'},{action:'report_fixture_step',manual:true}];
+    await frame.locator('#plan-approve').click();
+    // Approval covers the displayed file and exact checks: no per-action clicks.
+    await frame.locator('#plan-confirm').waitFor({state:'attached'});if(await frame.locator('#plan-toggle').getAttribute('aria-expanded')!=='true')await frame.locator('#plan-toggle').click();await frame.locator('#plan-confirm').waitFor();await frame.waitForFunction(()=>document.getElementById('stop').hidden);assert.equal(await frame.locator('.plan-step[data-status="completed"]').count(),2);assert.equal(await frame.locator('#prompt').inputValue(),'Keep the plan draft');
+    assert.equal(await frame.locator('.message-body').filter({hasText:'Please approve the plan again.'}).count(),0);assert.match(await frame.locator('#plan-popover').innerText(),/plan is already approved|Approved scope/);
+    // Review survives reopening the session; it is never auto-accepted.
+    await frame.locator('#close-chat').click();await frame.locator('#recent-sessions .session-title').first().click();await frame.locator('#plan-confirm').waitFor({state:'attached'});if(await frame.locator('#plan-toggle').getAttribute('aria-expanded')!=='true')await frame.locator('#plan-toggle').click();await frame.locator('#plan-confirm').waitFor();
+    await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Developer: Reload Window');
+    await Promise.all([window.waitForEvent('domcontentloaded'),window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Developer: Reload Window'}).first().click()]);
+    await window.locator('.monaco-workbench').waitFor();frame=await findFrame('#prompt');approval=frame.locator('#interaction-card');await frame.locator('#plan-confirm').waitFor({state:'attached'});if(await frame.locator('#plan-toggle').getAttribute('aria-expanded')!=='true')await frame.locator('#plan-toggle').click();await frame.locator('#plan-confirm').waitFor();assert.equal(await frame.locator('.plan-step[data-status="completed"]').count(),2);
+    await frame.locator('#open-settings').click();settings=await findFrame('#nav-providers');
+    if(await frame.locator('#plan-toggle').getAttribute('aria-expanded')!=='true')await frame.locator('#plan-toggle').click();await frame.locator('#plan-comment').fill('Reviewed the final fixture');await frame.locator('#plan-confirm').click();
+    await frame.waitForFunction(()=>document.querySelectorAll('.plan-step[data-status="completed"]').length===3);assert.equal(await fs.readFile(approvalFile,'utf8'),'autonomous');assert.equal(await dialog.isVisible(),false);
+    await choose('permission','Edit automatically');
     await send('Update approval.txt with two related replacements',[
       {action:'read_file',path:'approval.txt'},
       {action:'edit_file_batch',path:'approval.txt',edits:[{old_text:'autonomous',new_text:'verified'},{old_text:'verified',new_text:'atomic'}]},
       {action:'finish',text:'Atomic update completed.'}],'Atomic update completed.');
     assert.equal(await fs.readFile(approvalFile,'utf8'),'atomic');
-    scripted=[{action:'ask_user',question:'Which test behavior do you prefer?',options:['Fast','Full']},{action:'finish',text:'Decision received.'}];
+    scripted=[{action:'ask_user',question:'Which test behavior do you prefer?',options:['Fast','Full'],recommended_option:'Full'},{action:'finish',text:'Decision received.'}];
     await frame.locator('#prompt').fill('Ask me which test behavior to use');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-    const answer=window.locator('.quick-input-widget input[type="text"]');await answer.waitFor();await answer.fill('Full');await window.keyboard.press('Enter');await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
+    await frame.locator('#interaction-answer').waitFor();assert.equal(await frame.locator('.interaction-recommended').innerText(),'Recommended');assert.equal(await frame.locator('#timeline [data-interaction-id]:visible').count(),0);assert.equal(await dialog.isVisible(),false);await frame.locator('.interaction-option').filter({hasText:'Full'}).click();assert.equal(await frame.locator('#interaction-answer').inputValue(),'');assert.equal(await frame.locator('.interaction-option').filter({hasText:'Full'}).getAttribute('aria-checked'),'true');await frame.locator('#interaction-approve').click();await frame.locator('.message-body').filter({hasText:'Decision received.'}).waitFor();
+    await frame.waitForFunction(()=>document.getElementById('stop').hidden);
+    const answerFlow=JSON.parse(await fs.readFile(tracePath,'utf8'));assert.ok(answerFlow.turns.at(-1).request.Messages.some(m=>m.role==='tool'&&m.content==='Full'));
+    scripted=[{action:'ask_user',question:'Any extra constraints?'},{action:'finish',text:'Free answer received.'}];
+    await frame.locator('#prompt').fill('Discuss the constraints');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('#interaction-answer').fill('Keep the public API unchanged');await frame.locator('#interaction-approve').click();await frame.locator('.message-body').filter({hasText:'Free answer received.'}).waitFor();
+    scripted=[{action:'ask_user',question:'Continue with more changes?'},{action:'write_file',path:'should-not-exist.txt',content:'unexpected'}];
+    await frame.locator('#prompt').fill('Discuss further changes');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('#interaction-reject').click();await frame.waitForFunction(()=>document.getElementById('stop').hidden);await assert.rejects(fs.access(path.join(temp,'workspace','should-not-exist.txt')));assert.equal(scripted.length,1);
     await send('Create nested/new-file.txt with hello',[
       {action:'write_file',path:'nested/new-file.txt',content:'hello'},
       {action:'finish',text:'Nested file created.'}],'Nested file created.');
@@ -179,11 +230,11 @@ const root=path.resolve(__dirname,'..');
       await choose('permission',permission==='supervised'?'Ask before editing':'Edit automatically');
       scripted=[{action:'run_command',command:'echo vortex-command-'+permission},{action:'finish',text:'Command approved '+permission}];
       await frame.locator('#prompt').fill('Run the requested verification command');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-      await dialog.waitFor();await dialog.getByRole('button',{name:/Executar/}).click();
+      await approval.waitFor();assert.equal(await dialog.isVisible(),false);await frame.locator('#interaction-approve').click();
       await frame.locator('.message-body').filter({hasText:'Command approved '+permission}).waitFor();
       scripted=[{action:'run_command',command:'echo refused-command-'+permission}];
       await frame.locator('#prompt').fill('Run another verification command');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();
-      await dialog.waitFor();await dialog.getByRole('button',{name:/Cancel/}).click();
+      await approval.waitFor();await frame.locator('#interaction-reject').click();
       await frame.waitForFunction(()=>document.getElementById('run-status').textContent==='Stopped');
     }
     await frame.locator('#close-chat').click();await frame.locator('#recent-sessions .session-title').first().click();
@@ -191,8 +242,8 @@ const root=path.resolve(__dirname,'..');
     assert.equal(await frame.locator('#permission').inputValue(),'autonomous');
     // Review and undo operate on the persisted task journal.
     await frame.locator('[data-task-action="reviewChanges"]').click();
-    await window.locator('.quick-input-widget input[type="text"]').waitFor();await window.keyboard.press('Escape');
-    await frame.locator('[data-task-action="undoChanges"]').click();await dialog.waitFor();await dialog.getByRole('button',{name:'Undo',exact:true}).click();
+    await frame.locator('#vortex-dialog').waitFor();assert.equal(await dialog.isVisible(),false);await frame.locator('#vortex-dialog-search').fill('nested');await frame.locator('.vortex-dialog-choice').filter({hasText:'nested/new-file.txt'}).waitFor();await frame.locator('#vortex-dialog-cancel').click();
+    await frame.locator('[data-task-action="undoChanges"]').click();await frame.locator('#vortex-dialog').waitFor();assert.equal(await dialog.isVisible(),false);await frame.locator('#vortex-dialog-accept').click();
     for(let i=0;i<50;i++){try{await fs.access(path.join(temp,'workspace','nested','new-file.txt'));await new Promise(r=>setTimeout(r,100));}catch{break;}}
     await frame.waitForFunction(()=>document.getElementById('stop').hidden&&document.getElementById('run-status').textContent==='Ready');
     await assert.rejects(fs.access(path.join(temp,'workspace','nested','new-file.txt')));assert.equal(await fs.readFile(approvalFile,'utf8'),'original');
@@ -200,6 +251,10 @@ const root=path.resolve(__dirname,'..');
     await settings.getByRole('button',{name:'Edit',exact:true}).click();await settings.locator('#provider-name').fill('Edited connection');await settings.locator('#save-provider').click();await settings.locator('.connection h3').filter({hasText:'Edited connection'}).waitFor();await settings.locator('#cancel-form').click();
     await settings.getByRole('button',{name:'Remove',exact:true}).click();await settings.getByRole('button',{name:'Remove connection',exact:true}).click();await settings.locator('#connections').filter({hasText:'No providers'}).waitFor();await frame.locator('#selected-model').filter({hasText:'Select model'}).waitFor();
     await frame.locator('#close-chat').click();await frame.locator('#recent-sessions .session-title').first().waitFor();assert.equal(await frame.locator('#mode').inputValue(),'ask');await frame.locator('#recent-sessions .session-title').first().click();await frame.locator('.message-body').first().waitFor();
+    await frame.locator('#close-chat').click();await frame.locator('#recent-sessions .session-title').first().waitFor();const beforeDeletion=await frame.locator('#recent-sessions .session-row').count();
+    await frame.locator('#recent-sessions .session-row button[aria-label^="Delete session"]').first().click();await frame.locator('#vortex-dialog-title').filter({hasText:'Delete this session'}).waitFor();await frame.locator('#vortex-dialog-cancel').click();
+    await frame.waitForFunction(n=>document.querySelectorAll('#recent-sessions .session-row').length===n,beforeDeletion);
+    await frame.locator('#recent-sessions .session-title').first().click();await frame.locator('.message-body').first().waitFor();
     await frame.locator('#prompt').fill('Draft survives window reload');
     await window.keyboard.press('F1');await window.locator('.quick-input-widget input[type="text"]').fill('>Developer: Reload Window');
     await Promise.all([window.waitForEvent('domcontentloaded'),window.locator('.quick-input-list .monaco-list-row').filter({hasText:'Developer: Reload Window'}).first().click()]);
@@ -216,6 +271,6 @@ const root=path.resolve(__dirname,'..');
     await gatewaySettings.locator('#test-provider').click();await gatewaySettings.locator('#form-notice').filter({hasText:'Connection tested'}).waitFor();await gatewaySettings.locator('#save-provider').click();await gatewaySettings.locator('.connection-status').filter({hasText:'1 models'}).waitFor();await gatewaySettings.locator('#cancel-form').click();
     await frame.locator('#model-trigger').click();await frame.locator('.model-option').click();await frame.locator('#prompt').fill('Validate the gateway connection');await frame.waitForFunction(()=>!document.getElementById('send').disabled);await frame.locator('#send').click();await frame.locator('.message-body').filter({hasText:'Compatible gateway validated inside VS Code.'}).waitFor();
     await window.screenshot({path:path.join(root,'test-results','extension-host.png')});
-    console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, Plan→Agent checklist, session policy restoration, supervised edit approval/refusal, autonomous edits, terminal approval/refusal under both policies, atomic multi-edit, interactive clarification and recovery of rejected editor calls in Ask, isolated tool-cycle diagnosis and response token settings. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
+    console.log('Extension Host passed: real VS Code activation, webview CSP, provider test/save/catalog/select/send/edit/remove, draft retention including window reload, concurrent edit protection, all six mode/permission pairs, versioned three-step plan, automatic checks, manual review and reload during review, session policy restoration, supervised edit approval/refusal, autonomous edits, terminal approval/refusal under both policies, atomic multi-edit, sidebar approval cards, stop before approval, partial hunk selection, selectable/free-text/cancelled clarification and recovery of rejected editor calls in Ask, isolated tool-cycle diagnosis and response token settings. Local Ollama and compatible gateway without /v1 (Bearer key, catalog and chat) responses simulated.');
   }catch(error){if(app&&app.windows().length){const page=app.windows()[0];console.error('WORKBENCH AT FAILURE:',(await page.locator('body').innerText()).slice(-6000));await page.screenshot({path:path.join(root,'test-results','host-failure.png')}).catch(()=>{});for(const frame of page.frames())if(await frame.locator('#timeline').count()){console.error('CHAT AT FAILURE:',await frame.locator('#timeline').textContent());console.error('CHAT CONTROLS:',await frame.evaluate(()=>({prompt:document.getElementById('prompt')?.value,readOnly:document.getElementById('prompt')?.readOnly,sendDisabled:document.getElementById('send')?.disabled,status:document.getElementById('run-status')?.textContent,notice:document.getElementById('chat-notice')?.textContent})));}}throw error;}finally{if(app)await app.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

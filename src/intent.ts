@@ -7,6 +7,14 @@ export function isSocialMessage(message: string): boolean {
   return /^(?:(?:oi+|ola|hey|hi|hello|hola|bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|obrigad[oa]|muito obrigad[oa]|valeu|thanks|thank you|gracias|tudo bem|tudo bom|como vai|how are you|como estas)(?: vortex)?\s*)+$/.test(normalized);
 }
 
+// A narrow completion guard for explicit planning requests, not a complexity
+// classifier. Other development requests follow the mode prompt; an actual
+// propose_plan attempt also activates the runtime guard regardless of wording.
+export function isExplicitPlanningRequest(message:string):boolean {
+ const text=message.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+ return /^(?:(?:por favor|please)[,\s]+)?(?:planeje\b|plan(?:\s+(?!mode\b)|$)|(?:crie|monte|elabore|faca|gere|create|make|generate|propose|revise|update|atualize)\s+(?:(?:um|o|a|the|an?)\s+)?(?:plano|plan)\b)/.test(text);
+}
+
 // Conservative guard for a short, standalone promise of action. This is not an
 // intent classifier and never grants authorization or translates prose into tools.
 export function isActionAnnouncement(message:string,request=''):boolean {

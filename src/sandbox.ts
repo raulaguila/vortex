@@ -1,3 +1,4 @@
+import {planFingerprint} from './planFingerprint';
 import {ExecutionError} from './execution';
 import {mkdtemp,readdir,readFile,mkdir,writeFile,rm,lstat} from 'node:fs/promises';
 import * as path from 'node:path';
@@ -47,7 +48,7 @@ export class Sandbox {
   const before=await snapshotTree(root);
   for(const file of this.previous.keys())if(!before.has(file))await rm(path.join(this.directory,file),{force:true});
   for(const [file,content]of before){const dest=await safePath(this.directory,file);await mkdir(path.dirname(dest),{recursive:true});await writeFile(dest,content);}
-  this.previous=before;
+  this.previous=before;const testedBefore=await planFingerprint(this.directory);
   const name='vortex-'+randomUUID();const args=['run','--rm','--name',name,'--pull','never','--network',network?'bridge':'none','--read-only','--cap-drop=ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--user',`${process.getuid?.()||1000}:${process.getgid?.()||1000}`,'--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--env','HOME=/tmp','--mount',`type=bind,src=${this.directory},dst=/workspace`,'--workdir','/workspace',image,'sh','-lc',command];
   if(this.artifactsDirectory){await mkdir(this.artifactsDirectory,{recursive:true});this.leaseFile=path.join(this.artifactsDirectory,'lease-'+name+'.json');await writeFile(this.leaseFile,JSON.stringify({name,directory:this.directory,pid:process.pid}),{mode:0o600});}
   let output='',error:string|undefined,failure:Error|undefined;
@@ -72,6 +73,7 @@ export class Sandbox {
       total+=bytes.length;const target=path.join(destination,file);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});artifacts.push(target);
     }};await walk('');
   }
-  return {output,error,failure,changes,artifacts};
+  const testedAfter=await planFingerprint(this.directory);
+  return {output,error,failure,changes,artifacts,testedFingerprint:testedBefore&&testedBefore===testedAfter?testedAfter:null};
  }
 }

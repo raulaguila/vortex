@@ -5,7 +5,7 @@ test('mode prompts have distinct objectives and expose only executable tools',()
   const modes=['ask','plan','agent'];
   for(const mode of modes)for(const permission of ['supervised','autonomous']){const prompt=systemPrompt(mode,'auto',[],false,permission);
     assert.ok(prompt.length<25000,'Keep prompt bounded');
-    for(const action of Object.keys(registry))assert.equal(prompt.includes(`{"action":"${action}"`),allowedActions(mode).includes(action),mode+':'+action);
+    for(const action of Object.keys(registry))assert.equal(prompt.includes(`{"action":"${action}"`),allowedActions(mode).filter(n=>n!=='report_step_result').includes(action),mode+':'+action);
   }
   assert.match(systemPrompt('ask','en',[]),/ASK MODE/);
   assert.match(systemPrompt('plan','en',[]),/PLAN MODE/);
@@ -22,7 +22,7 @@ test('invalid tools, arguments and paths are rejected before execution',()=>{
 test('tool argument failures identify the exact field without exposing values',()=>{
  assert.throws(()=>validateAction({action:'read_file'},'ask'),/arguments.path is required/);
  assert.throws(()=>validateAction({action:'read_file',path:'a',start_line:'1'},'ask'),/arguments.start_line must be an integer/);
- assert.throws(()=>validateAction({action:'update_plan',items:[{id:'a',text:'Inspect',status:'complete'}]},'plan'),/arguments.items\[0\].status must be one of: pending, in_progress, completed/);
+ assert.throws(()=>validateAction({action:'propose_plan',objective:'Test',steps:[]},'plan'),/arguments.steps must contain/);
  assert.throws(()=>validateAction({action:'list_files',secret:'do-not-include-me'},'ask'),e=>e.message.includes('unknown field')&&!e.message.includes('do-not-include-me'));
 });
 
@@ -54,7 +54,7 @@ test('tool selection bullets exactly match the available tools in each mode and 
  for(const mode of ['ask','plan','agent'])for(const protocol of ['native','compatibility']){
   const prompt=systemPrompt(mode,'auto',[],false,'supervised',protocol);
   const guide=prompt.match(/<tool_selection>([\s\S]*?)<\/tool_selection>/)[1];
-  assert.deepEqual([...guide.matchAll(/^- (\w+):/gm)].map(m=>m[1]),allowedActions(mode).filter(n=>n!=='finish'));
+  assert.deepEqual([...guide.matchAll(/^- (\w+):/gm)].map(m=>m[1]),allowedActions(mode).filter(n=>n!=='finish'&&n!=='report_step_result'));
   assert.match(guide,/- search_files: Find text inside workspace files/);
   assert.match(guide,/- list_files: Discover workspace files by path or filename pattern/);
   assert.doesNotMatch(prompt.match(/<workflow>([\s\S]*?)<\/workflow>/)[1],/list_files|search_files|read_file/);

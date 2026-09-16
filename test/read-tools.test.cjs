@@ -9,6 +9,16 @@ test('reads use dirty buffers, record versions and expose line pagination',async
   mock.workspace.textDocuments=[];assert.match(await executeReadTool({action:'read_file',path:'a.txt'},root,new AbortController().signal),/disk/);
  }finally{mock.workspace.textDocuments=[];await fs.rm(root,{recursive:true,force:true});}
 });
+test('reads recognize a canonical editor URI when the workspace was opened through an alias',async()=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-read-alias-'));
+ try{
+  const real=path.join(await fs.realpath(temp),'real'),alias=path.join(temp,'alias');await fs.mkdir(real);await fs.symlink(real,alias,'dir');
+  const file=path.join(real,'a.txt');await fs.writeFile(file,'disk');
+  mock.workspace.textDocuments=[{uri:{scheme:'file',fsPath:file},isDirty:true,getText:()=> 'unsaved buffer'}];
+  const result=JSON.parse(await executeReadTool({action:'read_file',path:'a.txt'},alias,new AbortController().signal));
+  assert.equal(result.source,'buffer');assert.equal(result.dirty,true);assert.match(result.content,/unsaved buffer/);
+ }finally{mock.workspace.textDocuments=[];await fs.rm(temp,{recursive:true,force:true});}
+});
 test('file listing and search report the actual page coverage',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-search-'));try{
   await fs.writeFile(path.join(root,'a.txt'),'needle');mock.workspace.findFiles=async()=>Array.from({length:150},(_,i)=>({fsPath:path.join(root,i===0?'a.txt':`b${i}.txt`)}));
