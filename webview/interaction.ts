@@ -1,4 +1,4 @@
-import type {Interaction,InteractionReply} from '../src/protocol';
+import type {Interaction,InteractionReply} from "../src/ui/protocol";
 import {onHostMessage} from './messages';
 import type {ViewState} from './state';
 

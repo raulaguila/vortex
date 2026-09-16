@@ -1,5 +1,5 @@
 const test=require('node:test');const assert=require('node:assert/strict');
-const {Dialogs}=require('../dist/dialogs');const {parseRequest}=require('../dist/protocol');
+const {Dialogs}=require('../dist/ui/dialogs');const {parseRequest}=require('../dist/ui/protocol');
 const harness=()=>{const messages=[];const ui=new Dialogs(m=>messages.push(m));return {ui,messages,id:()=>messages.at(-1).dialog.id};};
 test('dialog choices validate IDs, cancel safely and reject stale or cross-surface replies',async()=>{
  const a=harness(),b=harness();const waiting=a.ui.pick('Files',[{label:'a',value:{path:'a'}},{label:'b',value:{path:'b'}}]);const id=a.id();

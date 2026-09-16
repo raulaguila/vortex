@@ -1,8 +1,8 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {validGrant,currentScope,includesGrant,addGrant}=require('../dist/planAuthorization');
-const {requestBinding,assertRequestBinding}=require('../dist/modelRequest');
-const {decodeAction,toolDefinitions}=require('../dist/actions');
-const {normalizeProposal}=require('../dist/planContract');
+const {validGrant,currentScope,includesGrant,addGrant}=require('../dist/plan/planAuthorization');
+const {requestBinding,assertRequestBinding}=require('../dist/providers/modelRequest');
+const {decodeAction,toolDefinitions}=require('../dist/tools/actions');
+const {normalizeProposal}=require('../dist/plan/planContract');
 test('plan grants match exact operation, command, cwd, network and location',()=>{
  const scope={step_id:'s',files:[{path:'src/a.ts',operation:'edit'}],commands:[{command:'npm test',cwd:'.',request_network:false,execution_location:'sandbox'}]};
  assert.ok(includesGrant(scope,{path:'src/a.ts',operation:'edit'}));assert.equal(includesGrant(scope,{path:'src/a.ts',operation:'delete'}),false);

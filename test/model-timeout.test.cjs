@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {Client}=require('../dist/providers');const {ProviderManager}=require('../dist/providerManager');const {parseRequest,defaultExecution}=require('../dist/protocol');
+const {Client}=require('../dist/providers/providers');const {ProviderManager}=require('../dist/providers/providerManager');const {parseRequest,defaultExecution}=require('../dist/ui/protocol');
 const provider=kind=>({id:'p',kind,name:'Test',baseUrl:'http://example.test'});
 const stalled=(_url,options)=>new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));
 test('model timeout is validated and old profiles receive 120 seconds without losing other limits',async()=>{

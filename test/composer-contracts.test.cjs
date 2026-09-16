@@ -1,9 +1,9 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
-const {validateAction,toolDefinitions}=require('../dist/actions');
-const {nativePayload,decodeNative}=require('../dist/native');
-const {turnActions,compatibilityTurn}=require('../dist/turnProtocol');
+const {validateAction,toolDefinitions}=require('../dist/tools/actions');
+const {nativePayload,decodeNative}=require('../dist/core/native');
+const {turnActions,compatibilityTurn}=require('../dist/core/turnProtocol');
 function webModule(file){const build=require('esbuild').buildSync({entryPoints:[path.join(__dirname,'../webview',file)],bundle:true,platform:'node',format:'cjs',write:false});const m=new (require('node:module'))(file);m._compile(build.outputFiles[0].text,file+'.cjs');return m.exports;}
 const args={question:'Which tests?',options:['Focused','Full suite'],recommended_option:'Focused'};
 test('a recommendation must explicitly match an offered answer',()=>{

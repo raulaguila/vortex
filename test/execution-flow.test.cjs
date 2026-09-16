@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {migrateExecution,ResponseDeadline,awaitApproval}=require('../dist/execution');
-const {ProviderManager}=require('../dist/providerManager');const {ContextEstimator}=require('../dist/context');
-const {Client}=require('../dist/providers');const {RunTrace}=require('../dist/trace');
+const {migrateExecution,ResponseDeadline,awaitApproval}=require('../dist/core/execution');
+const {ProviderManager}=require('../dist/providers/providerManager');const {ContextEstimator}=require('../dist/context/context');
+const {Client}=require('../dist/providers/providers');const {RunTrace}=require('../dist/session/trace');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 test('old execution limits migrate independently; malformed stored values are replaced',()=>{
@@ -40,4 +40,4 @@ test('unchanged API context can be saved after restart without rediscovering eve
  const key=JSON.stringify(['p','m']);const preferences={context:{[key]:{source:'api',tokens:32768}}};const manager=new ProviderManager({get:(k,f)=>k==='providers'?[{id:'p',kind:'compatible'}]:k==='modelPreferences'?preferences:f,update:async()=>{}},{});const p=manager.preferences();await manager.saveModels({defaults:p.defaults,favorites:[],manualModels:[],context:p.context,toolProtocols:{}});assert.equal(manager.preferences().context[key].tokens,32768);
 });
 
-test('malformed execution requests report validation errors',()=>{const {parseRequest}=require('../dist/protocol');for(const execution of [undefined,null,{},'invalid'])assert.throws(()=>parseRequest({type:'setExecution',requestId:'test',execution}),/Mensagem inválida/);});
+test('malformed execution requests report validation errors',()=>{const {parseRequest}=require('../dist/ui/protocol');for(const execution of [undefined,null,{},'invalid'])assert.throws(()=>parseRequest({type:'setExecution',requestId:'test',execution}),/Mensagem inválida/);});

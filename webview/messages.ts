@@ -1,4 +1,4 @@
-import type {Response} from '../src/protocol';
+import type {Response} from "../src/ui/protocol";
 const record=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const str=(v:unknown)=>typeof v==='string';const num=(v:unknown)=>typeof v==='number'&&Number.isFinite(v);
 const bool=(v:unknown)=>typeof v==='boolean';const array=(v:unknown)=>Array.isArray(v)&&v.length<=10000;

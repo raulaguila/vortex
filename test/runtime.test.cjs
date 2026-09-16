@@ -1,11 +1,11 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
-const {SessionStore}=require('../dist/sessions');const {fitContext}=require('../dist/context');const {systemPrompt}=require('../dist/prompt');
+const {SessionStore}=require('../dist/session/sessions');const {fitContext}=require('../dist/context/context');const {systemPrompt}=require('../dist/ui/prompt');
 test('sessions persist conversation and checklist, search old content and reopen',async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-sessions-'));try{const store=new SessionStore(dir);const s=store.create('Original title','plan',{providerId:'p',modelId:'m'});s.events=[{role:'user',text:'searchable detail'}];s.checklist=[{id:'a',text:'implement',status:'pending'}];await store.save(s);const reopened=new SessionStore(dir);assert.equal((await reopened.list('detail'))[0].id,s.id);assert.equal((await reopened.load(s.id)).checklist[0].text,'implement');await assert.rejects(reopened.load('../secrets'));await reopened.remove(s.id);assert.deepEqual(await reopened.list(),[]);}finally{await fs.rm(dir,{recursive:true,force:true});}});
 test('context fitting removes older pairs without mutating the saved conversation',()=>{const messages=[{role:'user',content:'task'},...Array.from({length:20},(_,i)=>({role:i%2?'user':'assistant',content:'x'.repeat(200)}))];const out=fitContext('system',messages,2048,512);assert.ok(out.removed>0);assert.ok(out.used<1536);assert.equal(messages.length,21);assert.equal(out.messages[0].content,'task');assert.throws(()=>fitContext('system',[{role:'user',content:'x'.repeat(3000)}],1024,256),/exceeds/);});
 test('prompt stays concise, follows response language and enforces plan read-only tools',()=>{const plan=systemPrompt('plan','auto',[]);assert.ok(plan.includes("language of the user's message"));assert.ok(plan.includes('propose_plan'));assert.ok(!plan.includes('{"action":"write_file"'));assert.ok(plan.length<25000);assert.ok(systemPrompt('agent','en',[],false,'autonomous').includes('{"action":"write_file"'));});
 
 test('preference writes remain authoritative with stale storage reads',async()=>{
-  const {ProviderManager}=require('../dist/providerManager');
+  const {ProviderManager}=require('../dist/providers/providerManager');
   const provider={id:'p',name:'Local',kind:'ollama',baseUrl:'http://localhost'};
   const manager=new ProviderManager({get:(key,fallback)=>key==='providers'?[provider]:fallback,update:async()=>{}},{get:async()=>'',store:async()=>{},delete:async()=>{}});
   await manager.setSelection({providerId:'p',modelId:'m'});await manager.applyMode('ask');
@@ -15,7 +15,7 @@ test('preference writes remain authoritative with stale storage reads',async()=>
   assert.equal(manager.preferences().conversation.language,'auto');
 });
 test('context metadata is discovered again after restart and cached for execution',async()=>{
-  const {ProviderManager}=require('../dist/providerManager');let calls=0;
+  const {ProviderManager}=require('../dist/providers/providerManager');let calls=0;
   const provider={id:'p',name:'Local',kind:'ollama',baseUrl:'http://localhost'};
   const manager=new ProviderManager({get:(key,fallback)=>key==='providers'?[provider]:fallback,update:async()=>{}},{get:async()=>'',store:async()=>{},delete:async()=>{}},async()=>{calls++;return new Response(JSON.stringify({model_info:{'llama.context_length':32768}}));});
   const model={providerId:'p',modelId:'m'};await manager.ensureLimits(model);await manager.ensureLimits(model);
@@ -23,7 +23,7 @@ test('context metadata is discovered again after restart and cached for executio
 });
 
 test('API source ignores old saved token count; both surfaces receive the effective budget',async()=>{
- const {ProviderManager}=require('../dist/providerManager');const model={providerId:'p',modelId:'m'};const key=JSON.stringify(['p','m']);
+ const {ProviderManager}=require('../dist/providers/providerManager');const model={providerId:'p',modelId:'m'};const key=JSON.stringify(['p','m']);
  const data={providers:[{id:'p',name:'Local',kind:'ollama',baseUrl:'http://localhost'}],modelPreferences:{selected:model,context:{[key]:{source:'api',tokens:262144}}}};
  const manager=new ProviderManager({get:(k,d)=>data[k]??d,update:async(k,v)=>{data[k]=v;}},{get:async()=>'',store:async()=>{},delete:async()=>{}},async()=>new Response(JSON.stringify({model_info:{'llama.context_length':131072}})));
  await manager.inspect(model);const state=await manager.snapshot();
@@ -47,13 +47,13 @@ test('session policies migrate legacy modes and retain all six new combinations'
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('live start protocol requires an explicit mode and permission, never legacy inference',()=>{
- const {parseRequest}=require('../dist/protocol');const base={type:'start',requestId:'policy',prompt:'hello',model:{providerId:'p',modelId:'m'}};
+ const {parseRequest}=require('../dist/ui/protocol');const base={type:'start',requestId:'policy',prompt:'hello',model:{providerId:'p',modelId:'m'}};
  for(const mode of ['ask','plan','agent'])for(const permission of ['supervised','autonomous'])assert.equal(parseRequest({...base,mode,permission}).permission,permission);
  for(const policy of [{mode:'agent'},{mode:'autonomous',permission:'autonomous'},{mode:'ask',permission:'full-access'},{mode:'ask',permission:true}])assert.throws(()=>parseRequest({...base,...policy}));
 });
 
 test('catalog refresh does not invalidate concurrent model context discovery',async()=>{
- const {ProviderManager}=require('../dist/providerManager');let resolveInfo;
+ const {ProviderManager}=require('../dist/providers/providerManager');let resolveInfo;
  const data={providers:[{id:'p',name:'Local',kind:'ollama',baseUrl:'http://localhost'}]};
  const manager=new ProviderManager({get:(k,d)=>data[k]??d,update:async(k,v)=>{data[k]=v;}},{get:async()=>'',store:async()=>{},delete:async()=>{}},async(url)=>{
   if(url.endsWith('/api/show'))return new Promise(resolve=>{resolveInfo=resolve;});
@@ -66,7 +66,7 @@ test('catalog refresh does not invalidate concurrent model context discovery',as
  assert.equal(manager.contextBudget({providerId:'p',modelId:'m'}).tokens,262144);
 });
 test('provider saves remain usable when backing storage reads are stale',async()=>{
- const {ProviderManager}=require('../dist/providerManager');
+ const {ProviderManager}=require('../dist/providers/providerManager');
  const manager=new ProviderManager({get:(k,d)=>d,update:async()=>{}},{get:async()=>'',store:async()=>{},delete:async()=>{}});
  const id=await manager.save({kind:'ollama',name:'Local',baseUrl:'http://localhost',key:'',clearKey:false});
  assert.equal(manager.providers()[0].id,id);await manager.setSelection({providerId:id,modelId:'m'});await manager.remove(id);

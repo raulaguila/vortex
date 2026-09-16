@@ -1,4 +1,4 @@
-import type {DialogReply,DialogSpec} from '../src/protocol';
+import type {DialogReply,DialogSpec} from "../src/ui/protocol";
 import {onHostMessage} from './messages';
 
 const el=<K extends keyof HTMLElementTagNameMap>(tag:K,className='',text?:string)=>{const node=document.createElement(tag);node.className=className;if(text!==undefined)node.textContent=text;return node;};

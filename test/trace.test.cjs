@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
-const {RunTrace}=require('../dist/trace');
-const {Client}=require('../dist/providers');
+const {RunTrace}=require('../dist/session/trace');
+const {Client}=require('../dist/providers/providers');
 test('last flow uses reference envelope, records rounds and redacts credential',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
  const file=path.join(dir,'last-flow.json');const trace=new RunTrace(file,{sessionId:'s',model:{modelId:'m'},prompt:'hello'});
@@ -25,7 +25,7 @@ test('trace preserves tool IDs, result sources and failed requests',async()=>{
 });
 
 test('compatibility trace records interpreted tool use and keeps provider stop and content',async()=>{
- const {compatibilityTurn}=require('../dist/turnProtocol');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
+ const {compatibilityTurn}=require('../dist/core/turnProtocol');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-trace-'));try{
   const trace=new RunTrace(path.join(dir,'last-flow.json'),{sessionId:'s',model:{modelId:'m'}});let count=0;const raw='{"action":"get_editor_context","include_selection":false}';
   const client=new Client({id:'p',name:'P',kind:'compatible',baseUrl:'http://local'},'',async()=>new Response(JSON.stringify({choices:[{message:{content:++count===1?raw:'Project summary.'},finish_reason:'stop'}]})));client.attachTrace(trace);
   const history=[{role:'user',content:'Describe the open project.'}],signal=new AbortController().signal;const first=compatibilityTurn(await client.chat('m','system',history,signal),'ask');await trace.interpreted(first);

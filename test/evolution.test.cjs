@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');
-const {readStream}=require('../dist/stream');const {decodeNative}=require('../dist/native');const {reviewPatch,selectHunks}=require('../dist/hunks');const {ChangeStore}=require('../dist/changes');const {snapshotTree}=require('../dist/sandbox');const {projectRules}=require('../dist/projectContext');
+const {readStream}=require('../dist/providers/stream');const {decodeNative}=require('../dist/core/native');const {reviewPatch,selectHunks}=require('../dist/tools/hunks');const {ChangeStore}=require('../dist/tools/changes');const {snapshotTree}=require('../dist/policy/sandbox');const {projectRules}=require('../dist/context/projectContext');
 function response(events,kind='openai'){const wire=events.map(e=>kind==='ollama'?JSON.stringify(e)+'\n':'data: '+JSON.stringify(e)+'\n\n').join('');const bytes=new TextEncoder().encode(wire);return new Response(new ReadableStream({start(c){for(let i=0;i<bytes.length;i+=3)c.enqueue(bytes.slice(i,i+3));c.close();}}));}
 test('stream indexes are bounded before allocating tool blocks',async()=>{
  await assert.rejects(readStream(response([{choices:[{delta:{tool_calls:[{index:1e9,function:{name:'read_file'}}]}}]}]),'openai',new AbortController().signal,()=>{}),/index/);
@@ -15,7 +15,7 @@ test('sandbox snapshots omit credentials, binaries and escaping symlinks',async(
 test('project rules load root then scoped instructions',async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-rules-'));try{await fs.mkdir(path.join(dir,'src'));await fs.writeFile(path.join(dir,'AGENTS.md'),'root');await fs.writeFile(path.join(dir,'src/AGENTS.md'),'specific');const rules=await projectRules(dir,['src/a.ts']);assert.deepEqual(rules.map(r=>r.text),['root','specific']);}finally{await fs.rm(dir,{recursive:true,force:true});}});
 
 test('session migration preserves IDs and does not resurrect deleted sessions',async()=>{
- const {SessionStore}=require('../dist/sessions');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-migrate-'));
+ const {SessionStore}=require('../dist/session/sessions');const dir=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-migrate-'));
  try{const old=new SessionStore(path.join(dir,'old'));const session=old.create('legacy','ask',{providerId:'p',modelId:'m'});await old.save(session);
  const next=new SessionStore(path.join(dir,'new'),path.join(dir,'old'),'/workspace');assert.equal((await next.load(session.id)).root,'/workspace');await next.remove(session.id);
  const reopened=new SessionStore(path.join(dir,'new'),path.join(dir,'old'),'/workspace');assert.deepEqual(await reopened.list(),[]);

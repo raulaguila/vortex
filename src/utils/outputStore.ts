@@ -1,4 +1,4 @@
-import { ToolOutputs } from '../toolOutputs';
+import { ToolOutputs } from "../tools/toolOutputs";
 
 /**
  * Persist a potentially large output string in a session-scoped ToolOutputs store.

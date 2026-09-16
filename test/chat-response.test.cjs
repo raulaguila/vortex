@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {Client}=require('../dist/providers');const {decodeNative}=require('../dist/native');
-const {compatibilityAnswer,responseMetadata}=require('../dist/chatResponse');
+const {Client}=require('../dist/providers/providers');const {decodeNative}=require('../dist/core/native');
+const {compatibilityAnswer,responseMetadata}=require('../dist/core/chatResponse');
 test('greeting succeeds then a tool-only response identifies protocol mismatch after an actual request',async()=>{
  let requests=0;const logs=[];const key='private-key';
  const client=new Client({id:'p',kind:'compatible',name:'Gateway',baseUrl:'http://example.test/company'},key,async(_url,options)=>{requests++;const body=JSON.parse(options.body);assert.equal(body.stream,false);return new Response(JSON.stringify(requests===1?{choices:[{message:{content:'Olá!'}}]}:{choices:[{finish_reason:'tool_calls',message:{content:null,tool_calls:[{id:'c',function:{name:'list_files',arguments:'{}'}}]}}]}));},record=>logs.push(record));

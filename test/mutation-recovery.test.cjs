@@ -2,8 +2,8 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 let buffer='original',saveFails=false,applyFails=false,applied=0;let file;
 const doc={isDirty:false,getText:()=>buffer,positionAt:n=>n,save:async()=>{if(saveFails)return false;await fs.writeFile(file,buffer);return true;}};
 const mock={Uri:{file:fsPath=>({fsPath})},Range:class{},Position:class{},WorkspaceEdit:class{replace(_uri,_range,text){this.text=text;}},workspace:{textDocuments:[],fs:{stat:uri=>fs.stat(uri.fsPath)},openTextDocument:async()=>doc,registerTextDocumentContentProvider:()=>({dispose(){}}),applyEdit:async edit=>{buffer=edit.text;applied++;if(applyFails)throw new Error('apply failed after changing buffer');return true;}},window:{showWarningMessage:async()=> 'Permitir'}};
-const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {AgentController}=require('../dist/agent');const {ReviewService}=require('../dist/review');Module._load=load;
-const {ChangeStore}=require('../dist/changes');
+const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {AgentController}=require('../dist/core/agent');const {ReviewService}=require('../dist/core/review');Module._load=load;
+const {ChangeStore}=require('../dist/tools/changes');
 test('executor preserves the proposal and pauses on apply, save or review-record failure after editing',async()=>{
  for(const stage of ['apply','save','record']){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-mutation-'));const id='11111111-1111-1111-1111-111111111111';

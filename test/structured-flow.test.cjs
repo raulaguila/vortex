@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {Client}=require('../dist/providers');const {toolDefinitions}=require('../dist/actions');const {ProviderManager}=require('../dist/providerManager');
-const {decodeNative,nativePayload,ToolsUnsupported}=require('../dist/native');const {compatibilityTurn,turnActions}=require('../dist/turnProtocol');
+const {Client}=require('../dist/providers/providers');const {toolDefinitions}=require('../dist/tools/actions');const {ProviderManager}=require('../dist/providers/providerManager');
+const {decodeNative,nativePayload,ToolsUnsupported}=require('../dist/core/native');const {compatibilityTurn,turnActions}=require('../dist/core/turnProtocol');
 const budget={tokens:16384,output:4096};
 test('structured multi-round flow preserves every call ID, result and message prefix',async()=>{
  const requests=[];let iteration=0;const client=new Client({id:'p',kind:'compatible',name:'test',baseUrl:'http://example.test'},'',async(_url,options)=>{
@@ -34,7 +34,7 @@ test('native provider-specific requests omit tool definitions for synthesis roun
 });
 
 test('native rejection feedback serializes matching tool errors for all provider formats',()=>{
- const {rejectionFeedback}=require('../dist/turnProtocol');const turn={kind:'tool_use',text:'',stopReason:'tool_use',calls:[{id:'rejected-id',name:'read_file',arguments:{path:42}}]};
+ const {rejectionFeedback}=require('../dist/core/turnProtocol');const turn={kind:'tool_use',text:'',stopReason:'tool_use',calls:[{id:'rejected-id',name:'read_file',arguments:{path:42}}]};
  for(const kind of ['openai','compatible','ollama','anthropic','gemini']){
   const history=rejectionFeedback('',turn,'ask',false,true,kind,'Invalid read arguments: arguments.path must be a string.');assert.equal(history[1].toolResult.id,'rejected-id');assert.equal(history[1].toolResult.status,'error');
   const body=nativePayload(kind,'m','s',history,[],{tokens:8192,output:1024}).body;
@@ -46,7 +46,7 @@ test('native rejection feedback serializes matching tool errors for all provider
 });
 
 test('editor include_selection accepts unambiguous provider spellings in both protocols',()=>{
- const {decodeAction,validateAction}=require('../dist/actions');
+ const {decodeAction,validateAction}=require('../dist/tools/actions');
  for(const mode of ['ask','plan','agent'])for(const [raw,expected] of [['false',false],['true',true],[' FALSE ',false],[' True ',true],[0,false],[1,true],['0',false],['1',true],['off',false],['ON',true],[false,false],[true,true],[null,undefined]]){
   const input={action:'get_editor_context',include_selection:raw},original=structuredClone(input);const expectedAction=expected===undefined?{action:'get_editor_context'}:{action:'get_editor_context',include_selection:expected};
   assert.deepEqual(decodeAction(input,mode),expectedAction);assert.deepEqual(input,original);
@@ -62,7 +62,7 @@ test('editor include_selection accepts unambiguous provider spellings in both pr
 });
 
 test('boolean parsing only applies to declared boolean arguments',()=>{
- const {decodeAction,validateAction}=require('../dist/actions');
+ const {decodeAction,validateAction}=require('../dist/tools/actions');
  assert.deepEqual(decodeAction({action:'search_files',query:'false',patterns:['on'],case_sensitive:0,regex:'off'},'ask'),{action:'search_files',query:'false',patterns:['on'],case_sensitive:false,regex:false});
  assert.deepEqual(decodeAction({action:'write_file',path:'off',content:'false'},'agent'),{action:'write_file',path:'off',content:'false'});
  assert.throws(()=>decodeAction({action:'read_file',path:'a',start_line:'1'},'ask'),/must be an integer/);

@@ -10,7 +10,7 @@ Module._load=function(name,...args){return name==='vscode'?{
   window:{showWarningMessage:async()=>{throw new Error('Tool approvals must stay in the sidebar');}},
   workspace:{applyEdit:async()=>{mutations++;throw new Error('Must not reach mutation without approval');}}
 }:originalLoad.call(this,name,...args);};
-const {AgentController}=require('../dist/agent');
+const {AgentController}=require('../dist/core/agent');
 Module._load=originalLoad;
 function deniedAgent(){let agent;agent=new AgentController({},message=>{if(message.type==='interaction'&&message.interaction){prompts++;queueMicrotask(()=>agent.respondInteraction({id:message.interaction.id,decision:'reject'}));}},{});return agent;}
 
@@ -39,7 +39,7 @@ test('executor rejects forged permission values and aborts before any sidebar re
 });
 
 test('normalized network flags preserve sandbox network approval',async()=>{
- const {decodeAction}=require('../dist/actions');const agent=deniedAgent();let executions=0,network;
+ const {decodeAction}=require('../dist/tools/actions');const agent=deniedAgent();let executions=0,network;
  agent.sandbox={available:async()=>true,execute:async(...args)=>{executions++;network=args[4];return {output:'ok',changes:[],artifacts:[]};}};
  const before=prompts;
  await assert.rejects(agent.execute(decodeAction({action:'run_command',command:'unused',request_network:'on'},'agent'),'agent',os.tmpdir(),new AbortController().signal,'autonomous'),/Approval denied/);assert.equal(prompts,before+1);assert.equal(executions,0);

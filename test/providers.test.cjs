@@ -1,7 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {ProviderManager} = require('../dist/providerManager');
-const {parseRequest} = require('../dist/protocol');
+const {ProviderManager} = require('../dist/providers/providerManager');
+const {parseRequest} = require('../dist/ui/protocol');
 class Storage {
   values = new Map();
   get(key, fallback) { return this.values.has(key) ? structuredClone(this.values.get(key)) : fallback; }

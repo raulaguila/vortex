@@ -1,4 +1,4 @@
-const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');const {Sandbox}=require('../dist/sandbox');
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');const {Sandbox}=require('../dist/policy/sandbox');
 test('real container isolates workspace, protects credentials, blocks network and imports only changes',async t=>{
  const sandbox=new Sandbox();if(!await sandbox.available()){if(process.env.VORTEX_REQUIRE_SANDBOX==='1')throw new Error('Required Docker runtime unavailable.');t.skip('Local Docker runtime unavailable; isolation NOT validated');return;}
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-isolation-'));try{

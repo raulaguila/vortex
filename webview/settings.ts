@@ -1,6 +1,6 @@
 import {setupDialogs} from './dialogs';
 import {onHostMessage} from './messages';
-import type {SettingsState} from '../src/protocol';
+import type {SettingsState} from "../src/ui/protocol";
 export {};
 const vscode = acquireVsCodeApi();
 const $ = (id:string):any => document.getElementById(id);

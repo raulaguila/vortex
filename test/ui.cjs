@@ -4,9 +4,9 @@ const {createServer} = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const {ProviderManager} = require('../dist/providerManager');
-const {parseRequest} = require('../dist/protocol');
-const {renderSidebar} = require('../dist/view');
+const {ProviderManager} = require('../dist/providers/providerManager');
+const {parseRequest} = require('../dist/ui/protocol');
+const {renderSidebar} = require('../dist/ui/view');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'test-results');
 const themes = {
@@ -301,7 +301,7 @@ class Secrets {values=new Map();async get(k){return this.values.get(k);}async st
     const bounds=await chat.locator('#vortex-dialog').boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=width);assert.ok(bounds.y>=0&&bounds.y+bounds.height<=800);
     await chat.screenshot({path:path.join(output,`dialog-${lang}-${theme}-${width}.png`)});await chat.locator('#vortex-dialog-cancel').click();
   }
-  const {PlanController}=require('../dist/plan');
+  const {PlanController}=require('../dist/plan/plan');
   const controlledPlan=PlanController.propose({objective:'Improve the settings workflow',steps:[{id:'ui',title:'Review settings layout',objective:'Keep the interface readable at narrow widths',depends_on:[],criteria:[{id:'visual',description:'Labels remain readable and controls are reachable',verification:'human'}]}]},'Improve settings',undefined,2);
   controlledPlan.state.authorization={session_id:'s',workspace:'/fixture',plan_version:1,revision:1,steps:[{step_id:'ui',files:[{path:'settings.ts',operation:'edit'}],commands:[]}]};
   await manager.setConversation({uiLanguage:'en'});await broadcast();await post(chat,{type:'planState',sessionId:'s',plan:controlledPlan.state,legacy:false});

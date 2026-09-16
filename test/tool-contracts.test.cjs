@@ -1,10 +1,10 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {validateAction,toolDefinitions,registry}=require('../dist/actions');
-const {systemPrompt}=require('../dist/prompt');
-const {nativePrompt}=require('../dist/native');
-const {applyEdits}=require('../dist/multiEdit');
-const {ToolOutputs}=require('../dist/toolOutputs');
-const {searchPage}=require('../dist/searchPage');
+const {validateAction,toolDefinitions,registry}=require('../dist/tools/actions');
+const {systemPrompt}=require('../dist/ui/prompt');
+const {nativePrompt}=require('../dist/core/native');
+const {applyEdits}=require('../dist/tools/multiEdit');
+const {ToolOutputs}=require('../dist/tools/toolOutputs');
+const {searchPage}=require('../dist/tools/searchPage');
 test('native and compatibility prompts preserve identical behavioral sections',()=>{
  for(const mode of ['ask','plan','agent'])for(const permission of ['supervised','autonomous']){
   const compatibility=systemPrompt(mode,'auto',[],false,permission),native=systemPrompt(mode,'auto',[],false,permission,'native');

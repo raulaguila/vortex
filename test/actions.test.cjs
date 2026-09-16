@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {validateAction,allowedActions,registry}=require('../dist/actions');
-const {systemPrompt}=require('../dist/prompt');
+const {validateAction,allowedActions,registry}=require('../dist/tools/actions');
+const {systemPrompt}=require('../dist/ui/prompt');
 test('mode prompts have distinct objectives and expose only executable tools',()=>{
   const modes=['ask','plan','agent'];
   for(const mode of modes)for(const permission of ['supervised','autonomous']){const prompt=systemPrompt(mode,'auto',[],false,permission);

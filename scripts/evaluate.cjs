@@ -1,13 +1,13 @@
 // Opt-in real providers; only synthetic fixtures are exposed to the shared runtime.
-const {ProviderManager}=require('../dist/providerManager');
-const {runIsolated}=require('../dist/isolatedRun');
+const {ProviderManager}=require('../dist/providers/providerManager');
+const {runIsolated}=require('../dist/providers/isolatedRun');
 const {verifySum}=require('./eval-math.cjs');
 const {createHash}=require('node:crypto');
 const {matchesGlob}=require('node:path');
-const {searchPage}=require('../dist/searchPage');
-const {systemPrompt}=require('../dist/prompt');
-const {applyEdits}=require('../dist/multiEdit');
-const {ApprovalDenied}=require('../dist/actions');
+const {searchPage}=require('../dist/tools/searchPage');
+const {systemPrompt}=require('../dist/ui/prompt');
+const {applyEdits}=require('../dist/tools/multiEdit');
+const {ApprovalDenied}=require('../dist/tools/actions');
 (async()=>{
  const {VORTEX_EVAL_URL:baseUrl,VORTEX_EVAL_MODEL:modelId,VORTEX_EVAL_KIND:kind='ollama',VORTEX_EVAL_KEY:key='',VORTEX_EVAL_PROTOCOL:protocol='auto'}=process.env;
  if(!baseUrl||!modelId)throw new Error('Set VORTEX_EVAL_URL and VORTEX_EVAL_MODEL.');

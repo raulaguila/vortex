@@ -7,8 +7,8 @@ const Module=require('node:module');
 const mock={window:{activeTextEditor:undefined,onDidChangeActiveTextEditor:()=>({dispose(){}})},workspace:{textDocuments:[],findFiles:async()=>[]},RelativePattern:class{constructor(root,pattern){this.root=root;this.pattern=pattern;}}};
 const load=Module._load;
 Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};
-const {EditorContext}=require('../dist/editorContext');
-const {executeReadTool}=require('../dist/readTools');
+const {EditorContext}=require('../dist/context/editorContext');
+const {executeReadTool}=require('../dist/tools/readTools');
 Module._load=load;
 test('one loaded document is explicitly distinguished from the complete workspace listing',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-editor-scope-'));
@@ -35,8 +35,8 @@ test('one loaded document is explicitly distinguished from the complete workspac
  }finally{editor.dispose();mock.workspace.textDocuments=[];await fs.rm(root,{recursive:true,force:true});}
 });
 test('every mode and protocol distinguishes editor metadata from project evidence',()=>{
- const {systemPrompt}=require('../dist/prompt');
- const {registry}=require('../dist/actions');
+ const {systemPrompt}=require('../dist/ui/prompt');
+ const {registry}=require('../dist/tools/actions');
  for(const mode of ['ask','plan','agent'])for(const protocol of ['native','compatibility']){
   const prompt=systemPrompt(mode,'auto',[],false,'supervised',protocol);
   assert.match(prompt,/Open editor documents are not a complete workspace listing/);

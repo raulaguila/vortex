@@ -4,7 +4,7 @@ import {setupDialogs} from './dialogs';
 import {setupComposer, localizedAttribute} from './composer';
 import {setupInteractions} from './interaction';
 import {onHostMessage} from './messages';
-import type {SettingsState} from '../src/protocol';
+import type {SettingsState} from "../src/ui/protocol";
 export {};
 const vscode=acquireVsCodeApi();
 const $=(id:string):any=>document.getElementById(id);

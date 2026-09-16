@@ -1,4 +1,4 @@
-const {test}=require('node:test');const assert=require('node:assert/strict');const https=require('node:https');const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');const {execFileSync}=require('node:child_process');const {Client}=require('../dist/providers');
+const {test}=require('node:test');const assert=require('node:assert/strict');const https=require('node:https');const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');const {execFileSync}=require('node:child_process');const {Client}=require('../dist/providers/providers');
 test('compatible Node transport preserves custom paths, key and streaming; redirects never forward credentials',async()=>{
  const http=require('node:http');let redirected=false;const requests=[];
  const server=http.createServer(async(req,res)=>{
@@ -16,13 +16,13 @@ test('compatible Node transport preserves custom paths, key and streaming; redir
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 test('compatible transport aborts an active response',async()=>{
- const http=require('node:http');const {compatibleRequest}=require('../dist/httpTransport');
+ const http=require('node:http');const {compatibleRequest}=require('../dist/providers/httpTransport');
  const server=http.createServer((_req,res)=>{res.writeHead(200);res.write('partial');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{const controller=new AbortController();const response=await compatibleRequest(`http://127.0.0.1:${server.address().port}`,{signal:controller.signal},false);const body=response.text();controller.abort();await assert.rejects(body);}
  finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 test('network diagnostics expose known cause codes without raw secret-bearing messages',()=>{
- const {connectionError}=require('../dist/httpTransport');const outer=new Error('https://secret@internal');outer.cause=Object.assign(new Error('private-key'),{code:'ENOTFOUND'});
+ const {connectionError}=require('../dist/providers/httpTransport');const outer=new Error('https://secret@internal');outer.cause=Object.assign(new Error('private-key'),{code:'ENOTFOUND'});
  assert.match(connectionError(outer),/DNS.*ENOTFOUND/);assert.ok(!connectionError(outer).includes('secret'));assert.ok(!connectionError(outer).includes('private-key'));
 });
 test('TLS insecure works for catalog and inference with a self-signed server, without changing other connections',async()=>{

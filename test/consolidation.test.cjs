@@ -1,8 +1,8 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
-const {performMutation}=require('../dist/operation');const {ChangeStore}=require('../dist/changes');
-const {QueryCache,mapLimited}=require('../dist/queryCache');const {SessionStore}=require('../dist/sessions');
-const {acquireSessionLock}=require('../dist/sessionLock');
+const {performMutation}=require('../dist/core/operation');const {ChangeStore}=require('../dist/tools/changes');
+const {QueryCache,mapLimited}=require('../dist/tools/queryCache');const {SessionStore}=require('../dist/session/sessions');
+const {acquireSessionLock}=require('../dist/session/sessionLock');
 test('mutation faults stop at each durable stage, never repeat effects or proceed past a failed save',async()=>{
  for(const fail of ['prepared','applying','apply','applied','save','saved','record','recorded']){
   const calls=[],states=[];let writes=0;
@@ -65,7 +65,7 @@ test('process termination around snapshot rename leaves a valid session and recl
 });
 
 test('profile migration publishes connections and preferences together despite delayed memento updates',async()=>{
- const {ProfileStore}=require('../dist/profileStore');const disk={providers:[{id:'preserved'}],modelPreferences:{schemaVersion:4}};let cache={...disk},fail=false;
+ const {ProfileStore}=require('../dist/providers/profileStore');const disk={providers:[{id:'preserved'}],modelPreferences:{schemaVersion:4}};let cache={...disk},fail=false;
  const source={get:(key,fallback)=>cache[key]??fallback,update:async(key,value)=>{if(fail)throw new Error('Disk unavailable');disk[key]=structuredClone(value);cache={modelPreferences:{schemaVersion:4}};}};
  const store=new ProfileStore(source);await store.update('modelPreferences',{schemaVersion:4,selected:{providerId:'preserved',modelId:'m'}});
  await store.update('providers',[{id:'preserved'},{id:'second'}]);assert.equal(disk.vortexProfile.providers.length,2);assert.equal(disk.vortexProfile.modelPreferences.selected.providerId,'preserved');

@@ -1,7 +1,7 @@
 const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');const assert=require('node:assert/strict');const Module=require('node:module');
-const {mapLimited}=require('../dist/queryCache');const {SessionStore}=require('../dist/sessions');
+const {mapLimited}=require('../dist/tools/queryCache');const {SessionStore}=require('../dist/session/sessions');
 let discoveries=0;const mock={workspace:{textDocuments:[],fs:{stat:uri=>fs.stat(uri.fsPath)},findFiles:async pattern=>{discoveries++;return (await fs.readdir(pattern.root)).map(name=>({fsPath:path.join(pattern.root,name)}));}},RelativePattern:class{constructor(root){this.root=root;}},Uri:{file:fsPath=>({fsPath})}};
-const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool}=require('../dist/readTools');Module._load=load;
+const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool}=require('../dist/tools/readTools');Module._load=load;
 (async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-benchmark-')),start=performance.now(),report={version:require('../package.json').version,node:process.version,platform:process.platform};
  try{

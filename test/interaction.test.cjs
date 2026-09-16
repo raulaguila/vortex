@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {Interactions}=require('../dist/interaction');const {parseRequest}=require('../dist/protocol');
+const {Interactions}=require('../dist/ui/interaction');const {parseRequest}=require('../dist/ui/protocol');
 const input={kind:'approval',runId:'run',operation:'edit',path:'a.ts',preview:true,hunks:[{label:'1',diff:'-old\n+new'}]};
 test('sidebar approvals wait for the exact live ID; preview and replay do not approve',async()=>{
  const events=[];let previews=0,settled=false;const broker=new Interactions(m=>events.push(m));

@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
-const {AgentRuntime}=require('../dist/agentRuntime'),{SessionStore}=require('../dist/sessions');
+const {AgentRuntime}=require('../dist/core/agentRuntime'),{SessionStore}=require('../dist/session/sessions');
 const proposal=(count=3,human=false)=>({action:'propose_plan',objective:'Check the project',steps:Array.from({length:count},(_,i)=>({title:'Check '+i,objective:'Verify project',depends_on:i?[i]:[],criteria:[{description:'Check passed',verification:human?'human':'command',...(human?{}:{command:'node --version',cwd:'.'})}]}))});
 async function fixture(t,respond,options={}){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-plan-runtime-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const events=[],calls=[],effects=[],model={providerId:'p',modelId:'m'};
@@ -46,7 +46,7 @@ test('persistence failure before next step stops advancement and new actions',as
  await h.approve();assert.equal(h.effects.length,1);assert.equal(h.runtime.session.plan.executions[1].status,'pending');assert.ok(h.events.some(e=>e.type==='runFailure'&&e.code==='persistence'));assert.equal(h.runtime.busy,false);
 });
 test('reload during a persisted validation requires explicit new attempt',async t=>{
- const {PlanController}=require('../dist/plan');const h=await fixture(t,successful);await h.start();const c=new PlanController(h.runtime.session.plan);c.approve(1,'supervised');c.begin();c.record({id:'e',tool:'read_file',status:'success',timestamp:Date.now()});c.prepareValidation({execution_id:c.state.execution_id,plan_version:1,step_id:'step-1',attempt:1,outcome:'completed',summary:'Checking',evidence:[{criterion_id:'criterion-1',tool_call_ids:['e']}],remaining_issues:[]});h.runtime.session.runState='running';await h.store.save(h.runtime.session);
+ const {PlanController}=require('../dist/plan/plan');const h=await fixture(t,successful);await h.start();const c=new PlanController(h.runtime.session.plan);c.approve(1,'supervised');c.begin();c.record({id:'e',tool:'read_file',status:'success',timestamp:Date.now()});c.prepareValidation({execution_id:c.state.execution_id,plan_version:1,step_id:'step-1',attempt:1,outcome:'completed',summary:'Checking',evidence:[{criterion_id:'criterion-1',tool_call_ids:['e']}],remaining_issues:[]});h.runtime.session.runState='running';await h.store.save(h.runtime.session);
  const loaded=await h.store.load(h.runtime.session.id);assert.equal(loaded.runState,'paused');assert.equal(loaded.plan.status,'paused');assert.equal(loaded.plan.executions[0].status,'interrupted');assert.equal(h.effects.length,0);
 });
 test('another window cannot approve or resume a session locked by the first window',async t=>{
@@ -56,14 +56,14 @@ test('legacy checklists load as unverified records without plan authorization',a
  const h=await fixture(t,successful);const s=h.store.create('Old plan','plan',{providerId:'p',modelId:'m'});s.checklist=[{id:'old',text:'Change code',status:'completed'}];await h.store.save(s);const loaded=await h.store.load(s.id);assert.equal(loaded.plan,undefined);assert.equal(loaded.checklist[0].status,'completed');
 });
 test('tool denial pauses the plan; explicit resume opens a new attempt and discards read snapshots',async t=>{
- const {ApprovalDenied}=require('../dist/actions');const h=await fixture(t,successful);await h.start();const execute=h.runtime.host.execute;h.runtime.host.execute=async()=>{throw new ApprovalDenied('Command denied');};await h.approve();const p=h.runtime.session.plan;assert.equal(p.executions[0].status,'interrupted');assert.equal(p.executions[1].status,'pending');assert.equal(p.executions[0].attempts[0].evidence.length,0);
+ const {ApprovalDenied}=require('../dist/tools/actions');const h=await fixture(t,successful);await h.start();const execute=h.runtime.host.execute;h.runtime.host.execute=async()=>{throw new ApprovalDenied('Command denied');};await h.approve();const p=h.runtime.session.plan;assert.equal(p.executions[0].status,'interrupted');assert.equal(p.executions[1].status,'pending');assert.equal(p.executions[0].attempts[0].evidence.length,0);
  h.runtime.readVersions.set('a','stale');h.runtime.host.execute=async a=>{assert.equal(h.runtime.readVersions.size,0);return execute(a);};await h.runtime.planAction({type:'resumePlan',requestId:'resume',sessionId:h.runtime.session.id,planId:p.plan_id,version:p.version,stepId:p.active_step,attempt:1});assert.equal(p.status,'completed');assert.equal(p.executions[0].attempts.length,2);
 });
 test('task deadline is shared across steps instead of restarting after completion',async t=>{
  const h=await fixture(t,async args=>{const result=successful(args);if(result.action==='report_step_result')await new Promise(r=>setTimeout(r,650));return result;},{taskTimeout:1});await h.start();await h.approve();assert.equal(h.runtime.session.plan.executions[0].status,'completed');assert.equal(h.runtime.session.plan.executions[1].status,'interrupted');assert.equal(h.effects.length,1);assert.ok(h.events.some(e=>e.type==='runFailure'&&e.code==='task_timeout'));
 });
 test('approval persisted before the first attempt can be resumed after a restart',async t=>{
- const {PlanController}=require('../dist/plan');const {parseRequest}=require('../dist/protocol');const h=await fixture(t,successful);await h.start();const p=h.runtime.session.plan;new PlanController(p).approve(1,'supervised');await h.store.save(h.runtime.session);await h.runtime.load(h.runtime.session.id);
+ const {PlanController}=require('../dist/plan/plan');const {parseRequest}=require('../dist/ui/protocol');const h=await fixture(t,successful);await h.start();const p=h.runtime.session.plan;new PlanController(p).approve(1,'supervised');await h.store.save(h.runtime.session);await h.runtime.load(h.runtime.session.id);
  const request={type:'resumePlan',requestId:'resume',sessionId:h.runtime.session.id,planId:p.plan_id,version:1};await h.runtime.planAction(request);assert.equal(h.runtime.session.plan.status,'completed');assert.equal(h.effects.length,3);
 });
 
@@ -105,13 +105,13 @@ for(const native of [false,true]){
 }
 
 test('empty native response during proposal recovery keeps usage and shares the rejection limit',async t=>{
- const {EmptyModelResponse}=require('../dist/native');let n=0;
+ const {EmptyModelResponse}=require('../dist/core/native');let n=0;
  const h=await fixture(t,()=>{n++;if(n===1){const p=proposal(1);delete p.steps[0].criteria[0].description;return p;}throw new EmptyModelResponse({kind:'final',stopReason:'stop',text:'',calls:[],usage:{input:123,output:5}});},{native:true});
  await h.start();assert.equal(h.calls.length,3);assert.equal(h.runtime.session.plan,undefined);assert.equal(h.events.filter(e=>e.type==='usage'&&e.input===123).length,2);assert.equal(h.events.findLast(e=>e.type==='runEnd').status,'error');
  assert.ok(h.calls[2].messages.some(m=>m.origin==='vortex_orchestrator'&&m.content.includes('Example arguments')));
 });
 test('proposal recovery can succeed after an empty native response',async t=>{
- const {EmptyModelResponse}=require('../dist/native');let n=0;
+ const {EmptyModelResponse}=require('../dist/core/native');let n=0;
  const h=await fixture(t,()=>{n++;if(n===1){const p=proposal(1);delete p.steps[0].criteria[0].description;return p;}if(n===2)throw new EmptyModelResponse({kind:'final',stopReason:'stop',text:'',calls:[]});return proposal(1);},{native:true});
  await h.start();assert.equal(h.calls.length,3);assert.equal(h.runtime.session.plan.status,'proposed');assert.equal(h.effects.length,0);
 });
@@ -134,7 +134,7 @@ for(const native of [false,true]){
   assert.ok(h.runtime.session.messages.some(m=>m.toolResult?.name==='propose_plan'),'history is retained');
  });
  test('stale IDs, empty output and final prose share a bounded step recovery without false recovered badges: '+native,async t=>{
-  const {EmptyModelResponse}=require('../dist/native');let n=0;
+  const {EmptyModelResponse}=require('../dist/core/native');let n=0;
   const h=await fixture(t,({system})=>{if(!system.includes('<execution_context>'))return proposal(1);n++;
    if(n===1)return {action:'report_step_result',execution_id:'old',plan_version:1,step_id:'wrong',attempt:99,outcome:'completed',summary:'Waiting for approval',evidence:[],remaining_issues:[]};
    if(n===2&&native)throw new EmptyModelResponse({kind:'final',stopReason:'stop',text:'',calls:[]});
@@ -157,7 +157,7 @@ for(const native of [false,true]){
 }
 
 for(const mode of ['ask','plan','agent'])test('empty native output during investigation is recoverable in '+mode,async t=>{
- const {EmptyModelResponse}=require('../dist/native');let n=0;
+ const {EmptyModelResponse}=require('../dist/core/native');let n=0;
  const h=await fixture(t,()=>{if(!n++)throw new EmptyModelResponse({kind:'final',stopReason:'stop',text:'',calls:[],usage:{input:12,output:1}});return mode==='plan'?proposal(1):{action:'finish',text:'The project contains an arithmetic helper.'};},{native:true});
  await h.start({mode,prompt:'What does the project contain?'});assert.equal(h.calls.length,2);assert.equal(h.effects.length,0);assert.equal(h.events.some(e=>e.type==='runFailure'),false);
 });
@@ -188,7 +188,7 @@ for(const native of [false,true]){
   await h.start();await h.approve();assert.equal(runs,3);assert.equal(h.runtime.session.plan.status,'paused');assert.equal(h.runtime.session.plan.executions[0].status,'failed');assert.equal(h.runtime.session.plan.executions[1].status,'pending');
  });
  test('uncertain verification never triggers an automatic correction: '+native,async t=>{
-  const {ExecutionError}=require('../dist/execution');const h=await fixture(t,successful,{native});let runs=0;h.runtime.host.execute=async()=>{runs++;throw new ExecutionError('uncertain_outcome','Partial effects');};await h.start();await h.approve();assert.equal(runs,1);assert.equal(h.runtime.session.pendingTool.name,'run_command');assert.equal(h.runtime.session.plan.status,'paused');assert.equal(h.runtime.session.plan.executions[0].attempts[0].corrections,undefined);
+  const {ExecutionError}=require('../dist/core/execution');const h=await fixture(t,successful,{native});let runs=0;h.runtime.host.execute=async()=>{runs++;throw new ExecutionError('uncertain_outcome','Partial effects');};await h.start();await h.approve();assert.equal(runs,1);assert.equal(h.runtime.session.pendingTool.name,'run_command');assert.equal(h.runtime.session.plan.status,'paused');assert.equal(h.runtime.session.plan.executions[0].attempts[0].corrections,undefined);
  });
 }
 test('old plan approval cannot become an authorization grant',async t=>{
@@ -204,6 +204,6 @@ test('host verification honors the declared network grant without adding a confl
  await h.start();assert.equal(h.runtime.session.plan.authorization.steps[0].commands.length,1);await h.approve();assert.equal(h.effects.length,1);assert.equal(h.effects[0].request_network,true);assert.equal(h.runtime.session.plan.status,'completed');
 });
 test('missing or transplanted scope can never resume an approved plan',async t=>{
- const h=await fixture(t,successful);await h.start();const p=h.runtime.session.plan;const {PlanController}=require('../dist/plan');new PlanController(p).approve(1,'autonomous');delete p.authorization;
+ const h=await fixture(t,successful);await h.start();const p=h.runtime.session.plan;const {PlanController}=require('../dist/plan/plan');new PlanController(p).approve(1,'autonomous');delete p.authorization;
  await assert.rejects(h.runtime.planAction({type:'resumePlan',requestId:'resume',sessionId:h.runtime.session.id,planId:p.plan_id,version:p.version}),/authorization/);assert.equal(h.effects.length,0);
 });

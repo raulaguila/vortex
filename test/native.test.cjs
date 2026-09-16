@@ -1,8 +1,8 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {nativePayload,decodeNative}=require('../dist/native');const {toolDefinitions,validateAction}=require('../dist/actions');
+const {nativePayload,decodeNative}=require('../dist/core/native');const {toolDefinitions,validateAction}=require('../dist/tools/actions');
 const budget={tokens:16384,output:2048};
 test('compatibility requests retain tool history without native wire fields',async()=>{
- const {Client}=require('../dist/providers');let body;
+ const {Client}=require('../dist/providers/providers');let body;
  const client=new Client({id:'p',kind:'anthropic',baseUrl:'https://example.test'},'key',async(_url,options)=>{body=JSON.parse(options.body);return new Response(JSON.stringify({content:[{type:'text',text:'summary'}]}));});
  await client.chat('model','summarize',[{role:'assistant',content:'',toolCalls:[{id:'c',name:'read_file',arguments:{path:'a.ts'}}],continuation:[{type:'thinking',thinking:'opaque'}]},{role:'user',content:'',toolResult:{id:'c',name:'read_file',status:'success',output:'source text'}}],new AbortController().signal,budget);
  assert.deepEqual(Object.keys(body.messages[0]),['role','content']);assert.match(body.messages[0].content,/a.ts/);assert.match(body.messages[1].content,/source text/);assert.ok(!JSON.stringify(body).includes('opaque'));
@@ -26,7 +26,7 @@ test('native schemas expose only the allowed tools in each mode',()=>{
  assert.equal(toolDefinitions('plan').at(-1).name,'propose_plan');assert.equal(toolDefinitions('agent').at(-1).name,'run_command');assert.deepEqual(toolDefinitions('agent',true),[]);
 });
 test('every provider omits mutation tools in Ask and Plan and the response boundary rejects them',()=>{
- const {systemPrompt}=require('../dist/prompt');const {turnActions,compatibilityTurn}=require('../dist/turnProtocol');
+ const {systemPrompt}=require('../dist/ui/prompt');const {turnActions,compatibilityTurn}=require('../dist/core/turnProtocol');
  const mutations=['write_file','edit_file','edit_file_batch','delete_file','run_command'];
  for(const mode of ['ask','plan'])for(const permission of ['supervised','autonomous']){
   for(const protocol of ['native','compatibility']){
@@ -48,7 +48,7 @@ test('every provider omits mutation tools in Ask and Plan and the response bound
  }
 });
 for(const kind of ['openai','compatible','ollama','anthropic','gemini'])test(kind+' preserves the controlled plan schema and report boundary',()=>{
- const {turnActions,compatibilityTurn}=require('../dist/turnProtocol');
+ const {turnActions,compatibilityTurn}=require('../dist/core/turnProtocol');
  const args={outcome:'completed',summary:'Verified',evidence:[{criterion_id:'test',tool_call_ids:['host-evidence']}],remaining_issues:[]};
  const call={id:'report',name:'report_step_result',arguments:args};
  const wire=kind==='anthropic'?{content:[{type:'tool_use',id:call.id,name:call.name,input:args}]}:kind==='gemini'?{candidates:[{content:{parts:[{functionCall:{id:call.id,name:call.name,args}}]}}]}:kind==='ollama'?{message:{tool_calls:[{id:call.id,function:{name:call.name,arguments:args}}]}}:{choices:[{message:{tool_calls:[{id:call.id,function:{name:call.name,arguments:JSON.stringify(args)}}]}}]};
@@ -61,7 +61,7 @@ for(const kind of ['openai','compatible','ollama','anthropic','gemini'])test(kin
 });
 
 test('empty-response recovery never sends empty assistant blocks to any provider',()=>{
- const {rejectionFeedback}=require('../dist/turnProtocol');
+ const {rejectionFeedback}=require('../dist/core/turnProtocol');
  for(const kind of ['openai','compatible','anthropic','gemini','ollama']){
   const rows=rejectionFeedback('',{kind:'final',text:'',calls:[],stopReason:'stop'},'agent',false,true,kind,'Empty response.',false,true);
   assert.equal(rows.length,1);assert.equal(rows[0].role,'user');assert.equal(rows[0].origin,'vortex_orchestrator');

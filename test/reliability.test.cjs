@@ -1,8 +1,8 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
-const {decodeReply}=require('../dist/reply');const {fitContext}=require('../dist/context');
-const {snapshotFile,verifySnapshot}=require('../dist/files');const {Client}=require('../dist/providers');
-const {safePath}=require('../dist/policy');
+const {decodeReply}=require('../dist/core/reply');const {fitContext}=require('../dist/context/context');
+const {snapshotFile,verifySnapshot}=require('../dist/tools/files');const {Client}=require('../dist/providers/providers');
+const {safePath}=require('../dist/policy/policy');
 test('symlink aliases cannot bypass protected files or change a pending edit target',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-links-'));
  try{

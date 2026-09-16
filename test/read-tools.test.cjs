@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const os=require('node:os');const Module=require('node:module');
 const mock={commands:{executeCommand:async()=>[]},workspace:{textDocuments:[],fs:{stat:uri=>fs.stat(uri.fsPath)},findFiles:async()=>[]},Uri:{file:fsPath=>({fsPath})},RelativePattern:class{constructor(root,pattern){this.root=root;this.pattern=pattern;}},languages:{getDiagnostics:()=>[]}};
-const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool,invalidateFileQueries}=require('../dist/readTools');Module._load=load;
+const load=Module._load;Module._load=function(name,...args){return name==='vscode'?mock:load.call(this,name,...args);};const {executeReadTool,invalidateFileQueries}=require('../dist/tools/readTools');Module._load=load;
 test('reads use dirty buffers, record versions and expose line pagination',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'vortex-read-'));try{
   const file=path.join(root,'a.txt');await fs.writeFile(file,'disk');mock.workspace.textDocuments=[{uri:{fsPath:file},isDirty:true,getText:()=>Array.from({length:300},(_,i)=>'buffer'+i).join('\n')}];
@@ -74,7 +74,7 @@ test('symbol queries include nested methods and containers',async()=>{
 });
 
 test('exclusion globs flatten alternatives for VS Code 1.96 ripgrep',()=>{
- const {exclusionGlob}=require('../dist/readTools');const glob=exclusionGlob(['approval.txt','src/{generated,{cache,tmp}}/**']);
+ const {exclusionGlob}=require('../dist/tools/readTools');const glob=exclusionGlob(['approval.txt','src/{generated,{cache,tmp}}/**']);
  assert.ok(glob.includes('approval.txt')&&glob.includes('src/generated/**')&&glob.includes('src/cache/**')&&glob.includes('src/tmp/**'));
  assert.ok(glob.includes('**/node_modules/**')&&glob.includes('**/.git/**')&&glob.includes('**/dist/**')&&glob.includes('**/build/**')&&glob.includes('**/.venv/**')&&glob.includes('**/vendor/**')&&glob.includes('**/target/**'));
  assert.throws(()=>exclusionGlob(['{a,b}'.repeat(10)]),/Too many/);

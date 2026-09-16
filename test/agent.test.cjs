@@ -3,9 +3,9 @@ const assert=require('node:assert/strict');
 const Module=require('node:module');
 const originalLoad=Module._load;
 Module._load=function(name,...args){return name==='vscode'?{workspace:{isTrusted:true,workspaceFolders:[]}}:originalLoad.call(this,name,...args);};
-const {AgentController}=require('../dist/agent');
+const {AgentController}=require('../dist/core/agent');
 Module._load=originalLoad;
-const {isSocialMessage}=require('../dist/intent');
+const {isSocialMessage}=require('../dist/core/intent');
 
 function harness(replies){
   const events=[],calls=[],tools=[];
@@ -73,7 +73,7 @@ test('repeated failing tools stop instead of cycling through twenty attempts',as
 });
 
 test('denied actions end the turn without allowing an alternative tool',async()=>{
-  const {ApprovalDenied}=require('../dist/actions');
+  const {ApprovalDenied}=require('../dist/tools/actions');
   const h=harness([{action:'write_file',path:'a',content:'x'},{action:'run_command',command:'alternative'}]);
   let attempts=0;h.agent.execute=async()=>{attempts++;throw new ApprovalDenied();};
   await h.run('Implement the requested change');
@@ -147,7 +147,7 @@ test('successful read loops stop after three identical results',async()=>{
  const h=harness([{action:'read_file',path:'a'}]);await h.run('Inspect project');assert.equal(h.tools.length,3);assert.equal(h.events.at(-1).status,'stopped');
 });
 test('read versions reject later external modifications or deletion',()=>{
- const h=harness([]);const {contentVersion}=require('../dist/readTools');h.agent.readVersions.set('/workspace/a',contentVersion('before'));
+ const h=harness([]);const {contentVersion}=require('../dist/tools/readTools');h.agent.readVersions.set('/workspace/a',contentVersion('before'));
  assert.doesNotThrow(()=>h.agent.verifyRead({path:'/workspace/a',content:'before'}));
  assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:'after'}),/changed/);
  assert.throws(()=>h.agent.verifyRead({path:'/workspace/a',content:null}),/changed/);
@@ -180,10 +180,10 @@ test('native announcement recovery retains tool result association',async()=>{
 });
 test('recovery never bypasses read-only policies and still stops on refusal',async()=>{
  const h=harness([{action:'finish',text:'Vou editar os arquivos.'},{action:'write_file',path:'a',content:'bad'},{action:'finish',text:'Use Agent para aplicar alterações.'}]);await h.run('Explain how to implement this','ask');assert.equal(h.tools.length,0);assert.equal(h.events.at(-1).status,'complete');
- const denied=harness([{action:'finish',text:'I will edit the file.'},{action:'write_file',path:'a',content:'new'}]);denied.agent.execute=async()=>{throw new (require('../dist/actions').ApprovalDenied)();};await denied.run('Edit a','agent');assert.equal(denied.calls.length,2);assert.equal(denied.events.at(-1).status,'stopped');
+ const denied=harness([{action:'finish',text:'I will edit the file.'},{action:'write_file',path:'a',content:'new'}]);denied.agent.execute=async()=>{throw new (require('../dist/tools/actions').ApprovalDenied)();};await denied.run('Edit a','agent');assert.equal(denied.calls.length,2);assert.equal(denied.events.at(-1).status,'stopped');
 });
 test('useful answers, questions, blockers and quoted examples do not trigger recovery',()=>{
- const {isActionAnnouncement}=require('../dist/intent');
+ const {isActionAnnouncement}=require('../dist/core/intent');
  for(const text of ['Como posso ajudar?','O projeto usa TypeScript.','Vou verificar, mas preciso que você abra uma pasta.','I will inspect if you open the workspace.','"Vou explorar os arquivos."','Example: I will inspect files.','Vou explicar o padrão MVC.','Vou verificar os testes. Os anteriores passaram.'])assert.equal(isActionAnnouncement(text),false,text);
  for(const text of ['Vou explorar os arquivos do workspace para entender o projeto.','I’ll inspect the workspace.','Voy a analizar el proyecto.'])assert.equal(isActionAnnouncement(text),true,text);
 });
@@ -202,7 +202,7 @@ test('step exhaustion synthesizes observed results without tools and stays pause
 });
 
 test('retry retains tool results without adding a duplicate user message',async()=>{
- const {ExecutionError}=require('../dist/execution');const h=harness([]);let count=0;
+ const {ExecutionError}=require('../dist/core/execution');const h=harness([]);let count=0;
  h.agent.providers.client=async()=>({chat:async()=>{count++;if(count===1)return JSON.stringify({action:'read_file',path:'a'});if(count===2)throw new ExecutionError('transport','offline',true);return 'File a was read.';}});
  await h.run('Read a','ask');assert.equal(h.events.findLast(e=>e.type==='runFailure').retryable,true);await h.agent.retry('retry');assert.equal(h.tools.length,1);assert.equal(h.events.filter(e=>e.event?.role==='user').length,1);assert.equal(h.events.at(-1).status,'complete');
 });
@@ -211,7 +211,7 @@ test('round budget and tool call budget are independent',async()=>{
  h.agent.providers.client=async()=>({turn:async()=>({text:'',calls:[{id:'a',name:'read_file',arguments:{path:'a'}},{id:'b',name:'read_file',arguments:{path:'b'}}]})});await h.run('Read a and b','ask');assert.equal(h.tools.length,2);assert.equal(h.events.at(-1).status,'stopped');assert.ok(h.events.some(e=>e.event?.text.includes('Work round limit')));
 });
 test('partial streaming response is saved as incomplete and is not retryable',async()=>{
- const {ExecutionError}=require('../dist/execution');const h=harness([]);h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
+ const {ExecutionError}=require('../dist/core/execution');const h=harness([]);h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'openai'}];
  h.agent.providers.client=async()=>({turn:async(...args)=>{args[6]('Partial answer');throw new ExecutionError('idle_timeout','stalled',true);}});await h.run('Describe the project','ask');assert.equal(h.tools.length,0);assert.ok(h.events.some(e=>e.type==='stream'&&e.incomplete));assert.equal(h.events.findLast(e=>e.type==='runFailure').retryable,false);assert.ok(h.agent.events.some(e=>e.incomplete));
 });
 
@@ -239,7 +239,7 @@ test('validation failures have a separate budget from executed tool failures',as
 });
 
 test('Ask executes read-only editor calls even when the provider finish reason is stop',async()=>{
- const {Client}=require('../dist/providers');const h=harness([]);let requests=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'compatible'}];
+ const {Client}=require('../dist/providers/providers');const h=harness([]);let requests=0;h.agent.providers.toolProtocol=()=> 'native';h.agent.providers.providers=()=>[{id:'p',kind:'compatible'}];
  h.agent.providers.client=async()=>new Client({id:'p',name:'Gateway',kind:'compatible',baseUrl:'http://gateway.test'},'',async(_url,options)=>{const body=JSON.parse(options.body);requests++;assert.ok(body.tools.some(t=>t.function.name==='get_editor_context'));return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:requests===1?{content:'',tool_calls:[{id:'open-files',type:'function',function:{name:'get_editor_context',arguments:'{}'}}]}:{content:'The open files were inspected.'}}]}),{headers:{'content-type':'application/json'}});});
  await h.run('What can you tell me about the open project?','ask');assert.equal(requests,2);assert.deepEqual(h.tools,[{action:'get_editor_context'}]);assert.equal(h.events.at(-1).status,'complete');assert.equal(h.agent.messages.find(m=>m.toolResult).toolResult.id,'open-files');
 });
@@ -256,7 +256,7 @@ test('uncertain outcomes require explicit review confirmation before another run
 test('response budget is frozen for a running task',async()=>{const h=harness([{action:'read_file',path:'a'},{action:'finish',text:'Done'}]);h.agent.providers.contextBudget=()=>({tokens:16384,output:h.calls.length?1000:4096,source:'custom'});await h.run('Read a','ask');assert.equal(h.calls[0][4].output,4096);assert.equal(h.calls[1][4].output,4096);});
 
 test('explicit planning completion guard does not classify conceptual questions or quoted examples',()=>{
- const {isExplicitPlanningRequest}=require('../dist/intent');
+ const {isExplicitPlanningRequest}=require('../dist/core/intent');
  for(const text of ['planeje as mudanças','Por favor, planeje a correção','Crie um plano','Atualize o plano','Plan an update','Please, revise the plan'])assert.equal(isExplicitPlanningRequest(text),true,text);
  for(const text of ['oi','What is a plan?','Explique o planejamento','Plan mode vs Ask mode?','Translate "Plan an update"','O projeto tem um plano?'])assert.equal(isExplicitPlanningRequest(text),false,text);
 });
